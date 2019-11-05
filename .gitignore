@@ -1,0 +1,10 @@
+
+checkpoints/*
+logs/*
+config/path.yaml
+src/__pycache__/
+src/data.py
+src/evaluate.py
+src/separate.py
+src/train.py
+src/preprocess.py
