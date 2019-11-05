@@ -17,7 +17,6 @@ from src.utils import DEV, DEBUG, NCOL
 from src.conv_tasnet import ConvTasNet
 from src.pit_criterion import cal_loss
 from src.dataset import wsj0
-from src.data import AudioDataLoader, AudioDataset
 from src.ranger import Ranger
 
 """
