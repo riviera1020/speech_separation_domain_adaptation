@@ -23,7 +23,9 @@ def preprocess(args):
                 if sr != args.sample_rate:
                     print('Error')
                     exit()
-                data[uid][speaker] = [ path, len(samples) ]
+
+                apath = path.replace(args.in_dir, '')
+                data[uid][speaker] = [ apath, len(samples) ]
 
         cPickle.dump(data, open(out_name, 'wb'))
 

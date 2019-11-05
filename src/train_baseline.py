@@ -76,8 +76,10 @@ class Trainer(Solver):
     def load_data(self):
 
         seg_len = self.config['data']['segment']
+        audio_root = self.config['data']['wsj_root']
 
         trainset = wsj0('./data/wsj0/id_list/tr.pkl',
+                audio_root = audio_root,
                 seg_len = seg_len,
                 pre_load = False,
                 one_chunk_in_utt = True,
@@ -88,6 +90,7 @@ class Trainer(Solver):
                 num_workers = self.num_workers)
 
         devset = wsj0('./data/wsj0/id_list/cv.pkl',
+                audio_root = audio_root,
                 seg_len = seg_len,
                 pre_load = False,
                 one_chunk_in_utt = False,

@@ -12,10 +12,11 @@ from torch.utils.data import Dataset
 
 class wsj0(Dataset):
 
-    def __init__(self, id_list_path, seg_len = 4.0, pre_load = True, one_chunk_in_utt = True, mode = 'tr'):
+    def __init__(self, id_list_path, audio_root, seg_len = 4.0, pre_load = True, one_chunk_in_utt = True, mode = 'tr'):
         """
         Args:
             id_list_path     : id_list from data/wsj0/preprocess.py
+            audio_root       : root dir for wsj0 dataset
             seg_len          : segment len for utt in sec
             pre_load         : pre load all audio into RAM
             one_chunk_in_utt : T -> random select one chunk in one utt
@@ -25,6 +26,7 @@ class wsj0(Dataset):
         super(wsj0, self).__init__()
 
         self.data = cPickle.load(open(id_list_path, 'rb'))
+        self.audio_root = audio_root
         self.sr = 8000
 
         if seg_len != -1:
@@ -83,6 +85,7 @@ class wsj0(Dataset):
                 self.audios[uid] = {}
                 for speaker in self.data[uid]:
                     path, _ = self.data[uid][speaker]
+                    path = os.path.join(audio_root, path)
                     audio, _ = sf.read(path)
                     audio = audio.astype(np.float32)
                     self.audios[uid][speaker] = audio
@@ -105,9 +108,9 @@ class wsj0(Dataset):
             s1_audio = self.audios[uid]['s1']
             s2_audio = self.audios[uid]['s2']
         else:
-            mix_path = self.data[uid]['mix'][0]
-            s1_path = self.data[uid]['s1'][0]
-            s2_path = self.data[uid]['s2'][0]
+            mix_path = os.path.join(self.audio_root, self.data[uid]['mix'][0])
+            s1_path = os.path.join(self.audio_root, self.data[uid]['s1'][0])
+            s2_path = os.path.join(self.audio_root, self.data[uid]['s2'][0])
 
             mix_audio, _ = sf.read(mix_path)
             s1_audio, _ = sf.read(s1_path)
