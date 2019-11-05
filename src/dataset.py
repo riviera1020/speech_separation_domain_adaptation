@@ -123,7 +123,10 @@ class wsj0(Dataset):
         if self.one_chunk:
             L = len(mix_audio)
             re = L - self.seg_len
-            s = random.randint(0, re - 1)
+            if re == 0:
+                s = 0
+            else:
+                s = random.randint(0, re - 1)
             e = s + self.seg_len
 
         mix_audio = mix_audio[s:e]
