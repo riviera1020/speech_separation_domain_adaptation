@@ -12,6 +12,7 @@ from tqdm import tqdm
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 
+from src.solver import Solver
 from src.saver import Saver
 from src.utils import DEV, DEBUG, NCOL
 from src.conv_tasnet import ConvTasNet
@@ -24,15 +25,6 @@ from src.sampler import BucketingSampler
 from src.scheduler import FlatCosineLR, CosineWarmupLR
 from src.weight_init import weight_init, weighter_bias_init
 """
-
-class Solver():
-    def __init__(self, config):
-        self.config = config
-
-    @staticmethod
-    def safe_mkdir(path):
-        if not os.path.exists(path):
-            os.makedirs(path)
 
 class Trainer(Solver):
 
@@ -165,7 +157,7 @@ class Trainer(Solver):
                         verbose = True)
 
     def exec(self):
-        for epoch in tqdm(range(self.start_epoch, self.epochs)):
+        for epoch in tqdm(range(self.start_epoch, self.epochs), ncols = NCOL):
             self.train_one_epoch(epoch)
             self.valid(self.cv_loader, epoch)
 
@@ -173,7 +165,7 @@ class Trainer(Solver):
         self.model.train()
         total_loss = 0.
 
-        for i, sample in enumerate(tqdm(self.tr_loader)):
+        for i, sample in enumerate(tqdm(self.tr_loader, ncols = NCOL)):
 
             padded_mixture = sample['mix'].to(DEV)
             padded_source = sample['ref'].to(DEV)
@@ -203,7 +195,7 @@ class Trainer(Solver):
         total_loss = 0.
 
         with torch.no_grad():
-            for i, sample in enumerate(tqdm(loader)):
+            for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
 
                 padded_mixture = sample['mix'].to(DEV)
                 padded_source = sample['ref'].to(DEV)
