@@ -58,7 +58,6 @@ class Trainer(Solver):
         self.grad_clip = config['solver']['grad_clip']
         self.num_workers = config['solver']['num_workers']
 
-        self.epoch = 0
         self.step = 0
         self.valid_times = 0
 
@@ -214,8 +213,8 @@ class Trainer(Solver):
         valid_score = {}
         valid_score['valid_loss'] = total_loss
 
-        model_name = f'{self.epoch}.pth'
-        info_dict = { 'epoch': self.epoch, 'valid_score': valid_score, 'config': self.config }
+        model_name = f'{epoch}.pth'
+        info_dict = { 'epoch': epoch, 'valid_score': valid_score, 'config': self.config }
         info_dict['optim'] = self.opt.state_dict()
 
         self.saver.update(self.model, total_loss, model_name, info_dict)
@@ -227,5 +226,4 @@ class Trainer(Solver):
             if self.scheduler_type == 'ReduceLROnPlateau':
                 self.lr_scheduler.step(total_loss)
             #elif self.scheduler_type in [ 'FlatCosine', 'CosineWarmup' ]:
-            #    self.lr_scheduler.step(self.epoch)
-
+            #    self.lr_scheduler.step(epoch)

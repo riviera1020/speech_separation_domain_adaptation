@@ -48,7 +48,8 @@ if __name__ == '__main__':
         if not args.test:
             from src.train_baseline import Trainer as Solver
         else:
-            pass
+            from src.test_baseline import Tester as Solver
+
     elif mode == 'debug':
         from src.train_debug import Trainer as Solver
     else:
