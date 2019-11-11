@@ -1,6 +1,6 @@
 # Created on 2018/12
 # Author: Kaituo XU
-
+import os
 import math
 
 import torch
@@ -65,6 +65,16 @@ def remove_pad(inputs, inputs_lengths):
             results.append(input[:length].view(-1).cpu().numpy())
     return results
 
+def load_mix_sdr(root_dir, prefixes):
+    ret = {}
+    for prefix in prefixes:
+        path = os.path.join(root_dir, prefix)
+        with open(path, 'r') as f:
+            sdr = f.readlines()[0]
+            sdr = sdr.rstrip()
+            sdr = float(sdr)
+            ret[prefix] = sdr
+    return ret
 
 if __name__ == '__main__':
     torch.manual_seed(123)

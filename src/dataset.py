@@ -147,12 +147,11 @@ class wsj0(Dataset):
 
 class wsj0_eval(Dataset):
 
-    def __init__(self, id_list_path, audio_root, seg_len = 4.0, pre_load = True):
+    def __init__(self, id_list_path, audio_root, pre_load = True):
         """
         Args:
             id_list_path     : id_list from data/wsj0/preprocess.py
             audio_root       : root dir for wsj0 dataset
-            seg_len          : segment len for utt in sec
             pre_load         : pre load all audio into RAM
         """
         super(wsj0_eval, self).__init__()
@@ -161,11 +160,16 @@ class wsj0_eval(Dataset):
         self.audio_root = audio_root
         self.sr = 8000
 
+        # get maxlen
+        self.maxlen = 0
+        for uid in self.data:
+            l = self.data[uid]['mix'][1]
+            if l > self.maxlen:
+                self.maxlen = l
+
         self.pre_load = pre_load
 
         self.id_list = []
-        drop_num = 0
-        drop_len = 0.0
         for uid in self.data:
             # Same template with wsj0
             info = [ uid, uid, -1, -1 ]
@@ -182,6 +186,11 @@ class wsj0_eval(Dataset):
                     audio, _ = sf.read(path)
                     audio = audio.astype(np.float32)
                     self.audios[uid][speaker] = audio
+
+    def pad_audio(self, audio, ilen):
+        base = np.zeros(self.maxlen, dtype = np.float32)
+        base[:ilen] = audio
+        return base
 
     def __len__(self):
         return len(self.id_list)
@@ -209,6 +218,14 @@ class wsj0_eval(Dataset):
             s2_audio = s2_audio.astype(np.float32)
 
         ilen = len(mix_audio)
+        '''
+        # TODO, pad make SDR worse ?
+        if ilen < self.maxlen:
+            mix_audio = self.pad_audio(mix_audio, ilen)
+            s1_audio = self.pad_audio(s1_audio, ilen)
+            s2_audio = self.pad_audio(s2_audio, ilen)
+        '''
+
         sep_audio = np.stack([s1_audio, s2_audio], axis = 0)
 
         sample = { 'uid': uid, 'cid': cid, 'ilens': ilen,

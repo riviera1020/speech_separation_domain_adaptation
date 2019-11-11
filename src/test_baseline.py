@@ -1,6 +1,7 @@
 import os
 import time
 import yaml
+import json
 import datetime
 
 import torch
@@ -14,8 +15,8 @@ from src.utils import DEV, DEBUG, NCOL
 from src.conv_tasnet import ConvTasNet
 from src.pit_criterion import cal_loss
 from src.dataset import wsj0_eval
-from src.evaluation import cal_SDRi, cal_SISNRi
-from src.sep_utils import remove_pad
+from src.evaluation import cal_SDR, cal_SISNRi
+from src.sep_utils import remove_pad, load_mix_sdr
 
 class Tester(Solver):
 
@@ -45,6 +46,8 @@ class Tester(Solver):
         self.set_model(state_dict)
         self.load_data()
 
+        self.sdr0 = load_mix_sdr('./data/wsj0/mix_sdr/', ['cv', 'tt'])
+
     def load_data(self):
 
         seg_len = self.config['data']['segment']
@@ -65,7 +68,6 @@ class Tester(Solver):
 
         devset = wsj0_eval('./data/wsj0/id_list/cv.pkl',
                 audio_root = audio_root,
-                seg_len = seg_len,
                 pre_load = False)
         self.cv_loader = DataLoader(devset,
                 batch_size = self.batch_size,
@@ -74,7 +76,6 @@ class Tester(Solver):
 
         testset = wsj0_eval('./data/wsj0/id_list/tt.pkl',
                 audio_root = audio_root,
-                seg_len = seg_len,
                 pre_load = False)
         self.tt_loader = DataLoader(devset,
                 batch_size = self.batch_size,
@@ -91,13 +92,13 @@ class Tester(Solver):
     def exec(self):
         self.print_info()
         #self.evaluate(self.cv_loader)
-        self.evaluate(self.tt_loader)
+        self.evaluate(self.tt_loader, 'tt')
 
-    def evaluate(self, loader):
+    def evaluate(self, loader, dset):
         self.model.eval()
         total_loss = 0.
         total_SISNRi = 0
-        total_SDRi = 0
+        total_SDR = 0
         total_cnt = 0
 
         with torch.no_grad():
@@ -120,18 +121,23 @@ class Tester(Solver):
                 padded_mixture = remove_pad(padded_mixture, mixture_lengths)
                 padded_source = remove_pad(padded_source, mixture_lengths)
                 reorder_estimate_source = remove_pad(reorder_estimate_source, mixture_lengths)
+
                 for b in range(B):
                     mix = padded_mixture[b]
                     src_ref = padded_source[b]
                     src_est = reorder_estimate_source[b]
 
-                    total_SDRi += cal_SDRi(src_ref, src_est, mix)
+                    total_SDR += cal_SDR(src_ref, src_est)
                     total_SISNRi += cal_SISNRi(src_ref, src_est, mix)
 
         total_loss /= total_cnt
-        total_SDRi /= total_cnt
+        total_SDR /= total_cnt
+        total_SDRi = total_SDR - self.sdr0[dset]
         total_SISNRi /= total_cnt
 
         result = { 'total_loss': total_loss, 'total_SDRi': total_SDRi, 'total_SISNRi': total_SISNRi }
         print(result)
+
+        rname = os.path.join(self.result_dir, 'result.json')
+        json.dump(result, open(rname, 'w'))
 

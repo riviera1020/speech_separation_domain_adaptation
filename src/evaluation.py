@@ -4,6 +4,22 @@
 import numpy as np
 from mir_eval.separation import bss_eval_sources
 
+def cal_SDR(src_ref, src_est):
+    """Calculate Source-to-Distortion Ratio (SDR).
+    NOTE: bss_eval_sources is very very slow.
+    Args:
+        src_ref: numpy.ndarray, [C, T]
+        src_est: numpy.ndarray, [C, T], reordered by best PIT permutation
+        mix: numpy.ndarray, [T]
+    Returns:
+        SDR
+    """
+    perm = False
+    sdr, sir, sar, popt = bss_eval_sources(src_ref, src_est, perm)
+    sdr = np.mean(sdr)
+    return sdr
+
+''' Deprecated
 def cal_SDRi(src_ref, src_est, mix):
     """Calculate Source-to-Distortion Ratio improvement (SDRi).
     NOTE: bss_eval_sources is very very slow.
@@ -20,7 +36,7 @@ def cal_SDRi(src_ref, src_est, mix):
     avg_SDRi = ((sdr[0]-sdr0[0]) + (sdr[1]-sdr0[1])) / 2
     # print("SDRi1: {0:.2f}, SDRi2: {1:.2f}".format(sdr[0]-sdr0[0], sdr[1]-sdr0[1]))
     return avg_SDRi
-
+'''
 
 def cal_SISNRi(src_ref, src_est, mix):
     """Calculate Scale-Invariant Source-to-Noise Ratio improvement (SI-SNRi)
