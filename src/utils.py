@@ -28,3 +28,7 @@ def read_config(path, local_path):
         config['data'][key] = path
     return config
 
+def inf_data_gen(loader):
+    while True:
+        for s in loader:
+            yield s

@@ -1,10 +1,11 @@
-
 import os
 import time
 import yaml
 import datetime
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
@@ -12,15 +13,12 @@ from torch.utils.data import DataLoader
 
 from src.solver import Solver
 from src.saver import Saver
-from src.utils import DEV, DEBUG, NCOL
+from src.utils import DEV, DEBUG, NCOL, inf_data_gen
 from src.conv_tasnet import ConvTasNet
 from src.pit_criterion import cal_loss
 from src.dataset import wsj0
 from src.ranger import Ranger
-
-"""
-from src.scheduler import FlatCosineLR, CosineWarmupLR
-"""
+from src.discriminator import RWD
 
 class Trainer(Solver):
 
@@ -48,14 +46,14 @@ class Trainer(Solver):
         if stream != None:
             self.writer.add_text('Config', stream)
 
-        self.epochs = config['solver']['epochs']
-        self.start_epoch = config['solver']['start_epoch']
+        self.total_steps = config['solver']['total_steps']
+        self.start_step = config['solver']['start_step']
         self.batch_size = config['solver']['batch_size']
         self.grad_clip = config['solver']['grad_clip']
         self.num_workers = config['solver']['num_workers']
-
-        self.step = 0
-        self.valid_times = 0
+        self.valid_step = config['solver']['valid_step']
+        self.g_iters = config['solver']['g_iters']
+        self.d_iters = config['solver']['d_iters']
 
         self.load_data()
         self.set_model()
@@ -74,7 +72,9 @@ class Trainer(Solver):
         self.tr_loader = DataLoader(trainset,
                 batch_size = self.batch_size,
                 shuffle = True,
-                num_workers = self.num_workers)
+                num_workers = self.num_workers,
+                drop_last = True)
+        self.data_gen = inf_data_gen(self.tr_loader)
 
         devset = wsj0('./data/wsj0/id_list/cv.pkl',
                 audio_root = audio_root,
@@ -87,56 +87,68 @@ class Trainer(Solver):
                 shuffle = False,
                 num_workers = self.num_workers)
 
-    def set_model(self):
-        self.model = ConvTasNet(self.config['model']).to(DEV)
+    def set_optim(self, model, opt_config):
+        lr = opt_config['lr']
+        weight_decay = opt_config['weight_decay']
 
-        optim_dict = None
-        if 'resume' in self.config['solver']:
-            model_path = self.config['solver']['resume']
-            if model_path != '':
-                print('Resuming Training')
-                print(f'Loading Model: {model_path}')
-
-                info_dict = torch.load(model_path)
-
-                print(f"Previous score: {info_dict['valid_score']}")
-                self.start_step = info_dict['epoch'] + 1
-
-                self.model.load_state_dict(info_dict['state_dict'])
-                print('Loading complete')
-
-                if self.config['solver']['resume_optim']:
-                    optim_dict = info_dict['optim']
-
-        lr = self.config['optim']['lr']
-        weight_decay = self.config['optim']['weight_decay']
-
-        optim_type = self.config['optim']['type']
+        optim_type = opt_config['type']
         if optim_type == 'SGD':
-            momentum = self.config['optim']['momentum']
-            self.opt = torch.optim.SGD(
-                    self.model.parameters(),
+            momentum = opt_config['momentum']
+            opt = torch.optim.SGD(
+                    model.parameters(),
                     lr = lr,
                     momentum = momentum,
                     weight_decay = weight_decay)
         elif optim_type == 'Adam':
-            self.opt = torch.optim.Adam(
-                    self.model.parameters(),
+            opt = torch.optim.Adam(
+                    model.parameters(),
                     lr = lr,
                     weight_decay = weight_decay)
         elif optim_type == 'ranger':
-            self.opt = Ranger(
-                    self.model.parameters(),
+            opt = Ranger(
+                    model.parameters(),
                     lr = lr,
                     weight_decay = weight_decay)
         else:
             print('Specify optim')
             exit()
+        return opt
 
-        if optim_dict != None:
-            print('Resume optim')
-            self.opt.load_state_dict(optim_dict)
+    def set_model(self):
+        self.G = ConvTasNet(self.config['model']['gen']).to(DEV)
+        self.D = RWD(self.config['model']['dis']).to(DEV)
 
+        self.real_label = torch.ones((1,)).to(DEV)
+        self.fake_label = torch.zeros((1,)).to(DEV)
+
+        self.g_optim = self.set_optim(self.G, self.config['g_optim'])
+        self.d_optim = self.set_optim(self.D, self.config['d_optim'])
+
+        model_path = self.config['solver']['resume']
+        if model_path != '':
+            print('Resuming Training')
+            print(f'Loading Model: {model_path}')
+
+            info_dict = torch.load(model_path)
+
+            print(f"Previous score: {info_dict['valid_score']}")
+            self.start_epoch = info_dict['epoch'] + 1
+
+            self.G.load_state_dict(info_dict['G_state_dict'])
+            self.D.load_state_dict(info_dict['D_state_dict'])
+            print('Loading complete')
+
+            if self.config['solver']['resume_optim']:
+                print('Loading optim')
+
+                optim_dict = info_dict['g_optim']
+                self.g_optim.load_state_dict(optim_dict)
+
+                optim_dict = info_dict['d_optim']
+                self.d_optim.load_state_dict(optim_dict)
+
+        # TODO, diff scheduler for G and D
+        '''
         self.use_scheduler = False
         if 'scheduler' in self.config['solver']:
             self.use_scheduler = self.config['solver']['scheduler']['use']
@@ -150,11 +162,61 @@ class Trainer(Solver):
                         factor = 0.5,
                         patience = patience,
                         verbose = True)
+        '''
 
     def exec(self):
-        for epoch in tqdm(range(self.start_epoch, self.epochs), ncols = NCOL):
-            self.train_one_epoch(epoch)
-            self.valid(self.cv_loader, epoch)
+
+        self.G.train()
+        for step in tqdm(range(self.start_step, self.total_steps), ncols = NCOL):
+
+            self.train_dis_once(step)
+            self.train_gen_once(step)
+
+            if step % self.valid_step == 0 and step != 0:
+                self.G.eval()
+                self.valid(self.cv_loader, epoch)
+                self.G.train()
+
+    def train_dis_once(self, step):
+        # assert batch_size is even
+
+        total_d_loss = 0.
+        for _ in range(self.d_iters):
+
+            # fake sample
+            sample = self.data_gen.__next__()
+            padded_mixture = sample['mix'].to(DEV)
+
+            estimate_source = self.G(padded_mixture)
+
+            with torch.no_grad():
+                y1, y2 = torch.chunk(estimate_source, 2, dim = 0)
+                remix = y1 + y2
+                remix = remix.view(-1, remix.size(-1))
+
+            d_fake = self.D(remix)
+            d_fake_loss = F.relu(1.0 + d_fake).mean()
+
+            # true sample
+            sample = self.data_gen.__next__()
+            padded_mixture = sample['mix'].to(DEV)
+            d_real = self.D(padded_mixture)
+            d_real_loss = F.relu(1.0 - d_real).mean()
+
+            d_loss = d_real_loss + d_fake_loss
+
+            self.d_optim.zero_grad()
+            d_loss.backward()
+            self.d_optim.step()
+
+            total_d_loss += d_loss.item()
+
+        total_d_loss /= self.d_iters
+        self.writer.add_scalar('train/d_loss', total_d_loss, step)
+        exit()
+
+    def train_gen_once(self, step):
+        pass
 
     def train_one_epoch(self, epoch):
         self.model.train()
