@@ -1,6 +1,7 @@
 import os
 import time
 import yaml
+import math
 import datetime
 
 import torch
@@ -53,6 +54,7 @@ class Trainer(Solver):
         self.G_grad_clip = config['solver']['G_grad_clip']
         self.num_workers = config['solver']['num_workers']
         self.valid_step = config['solver']['valid_step']
+        self.valid_time = 0
 
         self.g_iters = config['solver']['g_iters']
         self.d_iters = config['solver']['d_iters']
@@ -138,7 +140,7 @@ class Trainer(Solver):
             print(f"Previous score: {info_dict['valid_score']}")
             self.start_epoch = info_dict['epoch'] + 1
 
-            self.G.load_state_dict(info_dict['G_state_dict'])
+            self.G.load_state_dict(info_dict['state_dict'])
             self.D.load_state_dict(info_dict['D_state_dict'])
             print('Loading complete')
 
@@ -152,8 +154,8 @@ class Trainer(Solver):
                 self.d_optim.load_state_dict(optim_dict)
 
         # TODO, diff scheduler for G and D
-        '''
         self.use_scheduler = False
+        '''
         if 'scheduler' in self.config['solver']:
             self.use_scheduler = self.config['solver']['scheduler']['use']
             self.scheduler_type = self.config['solver']['scheduler']['type']
@@ -178,7 +180,7 @@ class Trainer(Solver):
 
             if step % self.valid_step == 0 and step != 0:
                 self.G.eval()
-                self.valid(self.cv_loader, epoch)
+                self.valid(self.cv_loader, step)
                 self.G.train()
 
     def train_dis_once(self, step):
@@ -211,8 +213,11 @@ class Trainer(Solver):
 
             self.d_optim.zero_grad()
             d_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.D.parameters(), self.D_grad_clip)
-            self.d_optim.step()
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.D.parameters(), self.D_grad_clip)
+            if math.isnan(grad_norm):
+                print('Error : grad norm is NaN @ step '+str(step))
+            else:
+                self.d_optim.step()
 
             total_d_loss += d_loss.item()
 
@@ -256,8 +261,11 @@ class Trainer(Solver):
 
             self.g_optim.zero_grad()
             g_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.G.parameters(), self.G_grad_clip)
-            self.g_optim.step()
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.G.parameters(), self.G_grad_clip)
+            if math.isnan(grad_norm):
+                print('Error : grad norm is NaN @ step '+str(step))
+            else:
+                self.g_optim.step()
 
             total_g_loss += g_loss.item()
             total_gan_loss += g_gan_loss.item()
@@ -269,9 +277,7 @@ class Trainer(Solver):
         self.writer.add_scalar('train/Le_loss', total_Le, step)
         self.writer.add_scalar('train/Lc_loss', total_Lc, step)
 
-    def valid(self, loader, epoch):
-        # TODO, only check loss now?
-        self.model.eval()
+    def valid(self, loader, step):
         total_loss = 0.
 
         with torch.no_grad():
@@ -281,7 +287,7 @@ class Trainer(Solver):
                 padded_source = sample['ref'].to(DEV)
                 mixture_lengths = sample['ilens'].to(DEV)
 
-                estimate_source = self.model(padded_mixture)
+                estimate_source = self.G(padded_mixture)
 
                 loss, max_snr, estimate_source, reorder_estimate_source = \
                     cal_loss(padded_source, estimate_source, mixture_lengths)
@@ -289,22 +295,26 @@ class Trainer(Solver):
                 total_loss += loss.item()
 
         total_loss = total_loss / len(self.tr_loader)
-        self.writer.add_scalar('valid/epoch_loss', total_loss, epoch)
+        self.writer.add_scalar('valid/pit_loss', total_loss, self.valid_time)
 
         valid_score = {}
         valid_score['valid_loss'] = total_loss
 
-        model_name = f'{epoch}.pth'
-        info_dict = { 'epoch': epoch, 'valid_score': valid_score, 'config': self.config }
-        info_dict['optim'] = self.opt.state_dict()
+        model_name = f'{step}.pth'
+        info_dict = { 'step': step, 'valid_score': valid_score, 'config': self.config }
+        info_dict['g_optim'] = self.g_optim.state_dict()
+        info_dict['d_optim'] = self.d_optim.state_dict()
+        info_dict['D_state_dict'] = self.D.state_dict()
 
-        self.saver.update(self.model, total_loss, model_name, info_dict)
+        self.saver.update(self.G, total_loss, model_name, info_dict)
 
         model_name = 'latest.pth'
-        self.saver.force_save(self.model, model_name, info_dict)
+        self.saver.force_save(self.G, model_name, info_dict)
 
         if self.use_scheduler:
             if self.scheduler_type == 'ReduceLROnPlateau':
                 self.lr_scheduler.step(total_loss)
             #elif self.scheduler_type in [ 'FlatCosine', 'CosineWarmup' ]:
             #    self.lr_scheduler.step(epoch)
+
+        self.valid_time += 1
