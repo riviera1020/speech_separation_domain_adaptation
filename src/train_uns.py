@@ -15,7 +15,7 @@ from src.solver import Solver
 from src.saver import Saver
 from src.utils import DEV, DEBUG, NCOL, inf_data_gen
 from src.conv_tasnet import ConvTasNet
-from src.pit_criterion import cal_loss
+from src.pit_criterion import cal_loss, cal_norm
 from src.dataset import wsj0
 from src.ranger import Ranger
 from src.discriminator import RWD
@@ -49,11 +49,15 @@ class Trainer(Solver):
         self.total_steps = config['solver']['total_steps']
         self.start_step = config['solver']['start_step']
         self.batch_size = config['solver']['batch_size']
-        self.grad_clip = config['solver']['grad_clip']
+        self.D_grad_clip = config['solver']['D_grad_clip']
+        self.G_grad_clip = config['solver']['G_grad_clip']
         self.num_workers = config['solver']['num_workers']
         self.valid_step = config['solver']['valid_step']
+
         self.g_iters = config['solver']['g_iters']
         self.d_iters = config['solver']['d_iters']
+        self.Lc_lambda = config['solver']['Lc_lambda']
+        self.Le_lambda = config['solver']['Le_lambda']
 
         self.load_data()
         self.set_model()
@@ -207,44 +211,63 @@ class Trainer(Solver):
 
             self.d_optim.zero_grad()
             d_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.D.parameters(), self.D_grad_clip)
             self.d_optim.step()
 
             total_d_loss += d_loss.item()
 
         total_d_loss /= self.d_iters
         self.writer.add_scalar('train/d_loss', total_d_loss, step)
-        exit()
 
     def train_gen_once(self, step):
-        pass
 
-    def train_one_epoch(self, epoch):
-        self.model.train()
-        total_loss = 0.
+        total_g_loss = 0.
+        total_gan_loss = 0.
+        total_Le = 0.
+        total_Lc = 0.
+        for _ in range(self.g_iters):
 
-        for i, sample in enumerate(tqdm(self.tr_loader, ncols = NCOL)):
-
+            sample = self.data_gen.__next__()
             padded_mixture = sample['mix'].to(DEV)
-            padded_source = sample['ref'].to(DEV)
-            mixture_lengths = sample['ilens'].to(DEV)
+            T = padded_mixture.size(-1)
 
-            estimate_source = self.model(padded_mixture)
+            estimate_source = self.G(padded_mixture)
+            y1, y2 = torch.chunk(estimate_source, 2, dim = 0)
+            remix = (y1 + y2).view(-1, T)
+            g_fake = self.D(remix)
 
-            loss, max_snr, estimate_source, reorder_estimate_source = \
-                cal_loss(padded_source, estimate_source, mixture_lengths)
+            g_gan_loss = - g_fake.mean()
 
-            self.opt.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-            self.opt.step()
+            # TODO, better Le?
+            Le = (padded_mixture.unsqueeze(1) * estimate_source).sum(dim = -1)
+            Le = (Le ** 2).sum(dim = -1).mean()
 
-            total_loss += loss.item()
+            Lc = 0.
+            if self.Lc_lambda > 0:
+                estimate_source = self.G(remix)
+                y1, y2 = torch.chunk(estimate_source, 2, dim = 0)
 
-            self.writer.add_scalar('train/iter_loss', loss.item(), self.step)
-            self.step += 1
+                reremix1 = (y1 + y2).view(-1, T)
+                reremix2 = (y1 + y2.flip(dims = [1])).view(-1, T)
 
-        total_loss = total_loss / len(self.tr_loader)
-        self.writer.add_scalar('train/epoch_loss', total_loss, epoch)
+                Lc = cal_norm(padded_mixture, reremix1, reremix2)
+
+            g_loss = g_gan_loss + self.Le_lambda * Le + self.Lc_lambda * Lc
+
+            self.g_optim.zero_grad()
+            g_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.G.parameters(), self.G_grad_clip)
+            self.g_optim.step()
+
+            total_g_loss += g_loss.item()
+            total_gan_loss += g_gan_loss.item()
+            total_Le += Le.item()
+            total_Lc += Lc.item()
+
+        self.writer.add_scalar('train/total_g_loss', total_g_loss, step)
+        self.writer.add_scalar('train/g_loss', total_gan_loss, step)
+        self.writer.add_scalar('train/Le_loss', total_Le, step)
+        self.writer.add_scalar('train/Lc_loss', total_Lc, step)
 
     def valid(self, loader, epoch):
         # TODO, only check loss now?

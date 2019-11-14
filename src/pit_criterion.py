@@ -23,6 +23,22 @@ def cal_loss(source, estimate_source, source_lengths):
     reorder_estimate_source = reorder_source(estimate_source, perms, max_snr_idx)
     return loss, max_snr, estimate_source, reorder_estimate_source
 
+def cal_norm(unmix, remix1, remix2):
+    """
+    Args:
+        unmix: [B, T]
+        remix1: [B, T]
+        remix2: [B, T]
+    """
+
+    perm1 = torch.norm((unmix - remix1), dim = -1).mean()
+    perm2 = torch.norm((unmix - remix2), dim = -1).mean()
+
+    loss = min((perm1, perm2))
+
+    # don't penalize if reconstruction loss is good
+    loss = F.relu(loss)
+    return loss
 
 def cal_si_snr_with_pit(source, estimate_source, source_lengths):
     """Calculate SI-SNR with PIT training.
@@ -125,7 +141,7 @@ if __name__ == "__main__":
     print('source', source)
     print('estimate_source', estimate_source)
     print('source_lengths', source_lengths)
-    
+
     loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(source, estimate_source, source_lengths)
     print('loss', loss)
     print('max_snr', max_snr)
