@@ -20,6 +20,7 @@ from src.pit_criterion import cal_loss, cal_norm
 from src.dataset import wsj0
 from src.ranger import Ranger
 from src.discriminator import RWD
+from src.MSD import MultiScaleDiscriminator
 
 class Trainer(Solver):
 
@@ -122,10 +123,12 @@ class Trainer(Solver):
 
     def set_model(self):
         self.G = ConvTasNet(self.config['model']['gen']).to(DEV)
-        self.D = RWD(self.config['model']['dis']).to(DEV)
 
-        self.real_label = torch.ones((1,)).to(DEV)
-        self.fake_label = torch.zeros((1,)).to(DEV)
+        dis_type = self.config['model']['dis']['type']
+        if dis_type == 'RWD':
+            self.D = RWD(self.config['model']['dis']).to(DEV)
+        elif dis_type == 'MSD':
+            self.D = MultiScaleDiscriminator(self.config['model']['dis']).to(DEV)
 
         self.g_optim = self.set_optim(self.G, self.config['g_optim'])
         self.d_optim = self.set_optim(self.D, self.config['d_optim'])
