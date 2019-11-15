@@ -5,10 +5,10 @@ import random
 
 import torch
 import torch.nn as nn
-from torch.nn.utils import spectral_norm
+from src.misc import apply_norm
 
 class DBlock(nn.Module):
-    def __init__(self, in_channel, out_channel, factor):
+    def __init__(self, in_channel, out_channel, factor, norm_type):
         """
         Args:
             in_channel: input channel
@@ -20,14 +20,14 @@ class DBlock(nn.Module):
         self.layers = nn.Sequential(
             nn.AvgPool1d(factor, stride=factor),
             nn.ReLU(),
-            spectral_norm(nn.Conv1d(in_channel, out_channel,
-                                    kernel_size=3, padding=1)),
+            apply_norm(nn.Conv1d(in_channel, out_channel,
+                                    kernel_size=3, padding=1), norm_type),
             nn.ReLU(),
-            spectral_norm(nn.Conv1d(out_channel, out_channel, kernel_size=3,
-                                    dilation=2, padding=2 * (3 - 1) // 2))
+            apply_norm(nn.Conv1d(out_channel, out_channel, kernel_size=3,
+                                    dilation=2, padding=2 * (3 - 1) // 2), norm_type)
         )
         self.residual = nn.Sequential(
-            spectral_norm(nn.Conv1d(in_channel, out_channel, kernel_size=1)),
+            apply_norm(nn.Conv1d(in_channel, out_channel, kernel_size=1), norm_type),
             nn.AvgPool1d(factor, stride=factor)
         )
 
@@ -39,7 +39,8 @@ class UnConditionalDBlocks(nn.Module):
     def __init__(self,
                  in_channel,
                  factors=(5, 3),
-                 out_channel=(128, 256)):
+                 out_channel=(128, 256),
+                 norm_type = None):
         super(UnConditionalDBlocks, self).__init__()
 
         self.in_channel = in_channel
@@ -47,15 +48,15 @@ class UnConditionalDBlocks(nn.Module):
         self.out_channel = out_channel
 
         self.layers = nn.ModuleList()
-        self.layers.append(DBlock(in_channel, 64, 1))
+        self.layers.append(DBlock(in_channel, 64, 1, norm_type))
         in_channel = 64
         for (i, factor) in enumerate(factors):
-            self.layers.append(DBlock(in_channel, out_channel[i], factor))
+            self.layers.append(DBlock(in_channel, out_channel[i], factor, norm_type))
             in_channel = out_channel[i]
-        self.layers.append(DBlock(in_channel, in_channel, 1))
-        self.layers.append(DBlock(in_channel, in_channel, 1))
+        self.layers.append(DBlock(in_channel, in_channel, 1, norm_type))
+        self.layers.append(DBlock(in_channel, in_channel, 1, norm_type))
+        #self.layers.append(DBlock(in_channel, 1, 1, norm_type))
         self.out = nn.Linear(in_channel, 1)
-        self.sigmoid = nn.Sigmoid()
 
     def forward(self, inputs):
         batch_size = inputs.size(0)
@@ -65,7 +66,6 @@ class UnConditionalDBlocks(nn.Module):
 
         outputs = outputs.mean(dim = -1)
         outputs = self.out(outputs)
-        outputs = self.sigmoid(outputs)
         return outputs
 
 class RWD(nn.Module):
@@ -81,10 +81,12 @@ class RWD(nn.Module):
         self.w = config['w']
         self.ks = config['ks']
         factorss = config['factorss']
+        norm_type = config['norm_type']
 
         self.ensembles = nn.ModuleList()
         for k, factors in zip(self.ks, factorss):
-            uDis = UnConditionalDBlocks(in_channel = k, factors = factors, out_channel = (128, 256))
+            uDis = UnConditionalDBlocks(in_channel = k, factors = factors,
+                    out_channel = (128, 256), norm_type = norm_type)
             self.ensembles.append(uDis)
 
     def forward(self, inputs):
@@ -98,9 +100,6 @@ class RWD(nn.Module):
             rand_inputs = inputs[:, index: index + w_len]
             output = uDis(rand_inputs)
             outputs.append(output)
-
-        outputs = torch.cat(outputs, dim = 1)
-        outputs = outputs.mean(dim = -1)
         return outputs
 
 if __name__ == '__main__':

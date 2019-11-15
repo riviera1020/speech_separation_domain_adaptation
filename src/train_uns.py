@@ -200,14 +200,19 @@ class Trainer(Solver):
                 remix = y1 + y2
                 remix = remix.view(-1, remix.size(-1))
 
-            d_fake = self.D(remix)
-            d_fake_loss = F.relu(1.0 + d_fake).mean()
+            d_fake_loss = 0.
+            d_fakes = self.D(remix)
+            for d_fake in d_fakes:
+                d_fake_loss += F.relu(1.0 + d_fake).mean()
 
             # true sample
             sample = self.data_gen.__next__()
             padded_mixture = sample['mix'].to(DEV)
-            d_real = self.D(padded_mixture)
-            d_real_loss = F.relu(1.0 - d_real).mean()
+
+            d_real_loss = 0.
+            d_reals = self.D(padded_mixture)
+            for d_real in d_reals:
+                d_real_loss += F.relu(1.0 - d_real).mean()
 
             d_loss = d_real_loss + d_fake_loss
 
@@ -239,9 +244,11 @@ class Trainer(Solver):
             estimate_source = self.G(padded_mixture)
             y1, y2 = torch.chunk(estimate_source, 2, dim = 0)
             remix = (y1 + y2).view(-1, T)
-            g_fake = self.D(remix)
+            g_fakes = self.D(remix)
 
-            g_gan_loss = - g_fake.mean()
+            g_gan_loss = 0.
+            for g_fake in g_fakes:
+                g_gan_loss += (- g_fake.mean())
 
             # TODO, better Le?
             Le = (padded_mixture.unsqueeze(1) * estimate_source).sum(dim = -1)
