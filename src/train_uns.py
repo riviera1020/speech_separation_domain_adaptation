@@ -289,7 +289,8 @@ class Trainer(Solver):
             total_g_loss += g_loss.item()
             total_gan_loss += g_gan_loss.item()
             total_Le += Le.item()
-            total_Lc += Lc.item()
+            if self.Lc_lambda > 0:
+                total_Lc += Lc.item()
 
         self.writer.add_scalar('train/total_g_loss', total_g_loss, step)
         self.writer.add_scalar('train/g_loss', total_gan_loss, step)
