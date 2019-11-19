@@ -2,6 +2,7 @@ import os
 import time
 import yaml
 import math
+import random
 import datetime
 
 import torch
@@ -200,6 +201,11 @@ class Trainer(Solver):
 
             with torch.no_grad():
                 y1, y2 = torch.chunk(estimate_source, 2, dim = 0)
+
+                # random mix
+                if random.random() < 0.5:
+                    y2 = y2.flip(dims = [1])
+
                 remix = y1 + y2
                 remix = remix.view(-1, remix.size(-1))
 
@@ -246,6 +252,9 @@ class Trainer(Solver):
 
             estimate_source = self.G(padded_mixture)
             y1, y2 = torch.chunk(estimate_source, 2, dim = 0)
+
+            if random.random() < 0.5:
+                y2 = y2.flip(dims = [1])
             remix = (y1 + y2).view(-1, T)
             g_fakes = self.D(remix)
 
