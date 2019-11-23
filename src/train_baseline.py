@@ -16,6 +16,7 @@ from src.utils import DEV, DEBUG, NCOL
 from src.conv_tasnet import ConvTasNet
 from src.pit_criterion import cal_loss
 from src.dataset import wsj0
+from src.vctk import VCTK
 from src.ranger import Ranger
 
 """
@@ -62,6 +63,17 @@ class Trainer(Solver):
 
     def load_data(self):
 
+        dset = 'wsj0'
+        if 'dset' in self.config['data']:
+            dset = self.config['data']['dset']
+
+        if dset == 'wsj0':
+            self.load_wsj0_data()
+        elif dset == 'vctk':
+            self.load_vctk_data()
+
+    def load_wsj0_data(self):
+
         seg_len = self.config['data']['segment']
         audio_root = self.config['data']['wsj_root']
 
@@ -77,6 +89,33 @@ class Trainer(Solver):
                 num_workers = self.num_workers)
 
         devset = wsj0('./data/wsj0/id_list/cv.pkl',
+                audio_root = audio_root,
+                seg_len = seg_len,
+                pre_load = False,
+                one_chunk_in_utt = False,
+                mode = 'cv')
+        self.cv_loader = DataLoader(devset,
+                batch_size = self.batch_size,
+                shuffle = False,
+                num_workers = self.num_workers)
+
+    def load_vctk_data(self):
+
+        seg_len = self.config['data']['segment']
+        audio_root = self.config['data']['vctk_root']
+
+        trainset = VCTK('./data/vctk/id_list/tr.pkl',
+                audio_root = audio_root,
+                seg_len = seg_len,
+                pre_load = False,
+                one_chunk_in_utt = True,
+                mode = 'tr')
+        self.tr_loader = DataLoader(trainset,
+                batch_size = self.batch_size,
+                shuffle = True,
+                num_workers = self.num_workers)
+
+        devset = VCTK('./data/vctk/id_list/cv.pkl',
                 audio_root = audio_root,
                 seg_len = seg_len,
                 pre_load = False,
