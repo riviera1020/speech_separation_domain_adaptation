@@ -8,12 +8,13 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 from mir_eval.separation import bss_eval_sources
 
+from src.vctk import VCTK_eval
 from src.dataset import wsj0_eval
 from src.sep_utils import remove_pad
 
 NCOL = 100
 
-def load_data():
+def load_wsj0_data():
     audio_root = '/home/riviera1020/Big/Corpus/wsj0-mix/'
     batch_size = 1
     num_workers = 2
@@ -26,6 +27,28 @@ def load_data():
             num_workers = num_workers)
 
     testset = wsj0_eval('./data/wsj0/id_list/tt.pkl',
+            audio_root = audio_root,
+            pre_load = False)
+    tt_loader = DataLoader(devset,
+            batch_size = batch_size,
+            shuffle = False,
+            num_workers = num_workers)
+
+    return cv_loader, tt_loader
+
+def load_vctk_data():
+    audio_root = '/home/riviera1020/Big/Corpus/vctk-mix/wav8k/min/'
+    batch_size = 1
+    num_workers = 2
+    devset = VCTK_eval('./data/vctk/id_list/cv.pkl',
+            audio_root = audio_root,
+            pre_load = False)
+    cv_loader = DataLoader(devset,
+            batch_size = batch_size,
+            shuffle = False,
+            num_workers = num_workers)
+
+    testset = VCTK_eval('./data/vctk/id_list/tt.pkl',
             audio_root = audio_root,
             pre_load = False)
     tt_loader = DataLoader(devset,
@@ -81,9 +104,9 @@ def dump_result(total_sdr, result, out_dir, prefix, dump_all = False):
 
 def main():
 
-    out_dir = './data/wsj0/mix_sdr/'
+    out_dir = './data/vctk/mix_sdr/'
 
-    cv_loader, tt_loader = load_data()
+    cv_loader, tt_loader = load_vctk_data()
 
     total_sdr, result = comp_oneset(cv_loader)
     dump_result(total_sdr, result, out_dir, prefix = 'cv', dump_all = True)

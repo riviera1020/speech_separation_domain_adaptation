@@ -15,6 +15,7 @@ from src.utils import DEV, DEBUG, NCOL
 from src.conv_tasnet import ConvTasNet
 from src.pit_criterion import cal_loss
 from src.dataset import wsj0_eval
+from src.vctk import VCTK_eval
 from src.evaluation import cal_SDR, cal_SISNRi
 from src.sep_utils import remove_pad, load_mix_sdr
 
@@ -44,32 +45,15 @@ class Tester(Solver):
 
         state_dict = save_dict['state_dict']
         self.set_model(state_dict)
-        self.load_data()
 
-        self.sdr0 = load_mix_sdr('./data/wsj0/mix_sdr/', ['cv', 'tt'])
+    def load_wsj0_data(self):
 
-    def load_data(self):
-
-        seg_len = self.config['data']['segment']
         audio_root = self.config['data']['wsj_root']
-
-        '''
-        trainset = wsj0('./data/wsj0/id_list/tr.pkl',
-                audio_root = audio_root,
-                seg_len = seg_len,
-                pre_load = False,
-                one_chunk_in_utt = True,
-                mode = 'tr')
-        self.tr_loader = DataLoader(trainset,
-                batch_size = self.batch_size,
-                shuffle = True,
-                num_workers = self.num_workers)
-        '''
 
         devset = wsj0_eval('./data/wsj0/id_list/cv.pkl',
                 audio_root = audio_root,
                 pre_load = False)
-        self.cv_loader = DataLoader(devset,
+        cv_loader = DataLoader(devset,
                 batch_size = self.batch_size,
                 shuffle = False,
                 num_workers = self.num_workers)
@@ -77,10 +61,32 @@ class Tester(Solver):
         testset = wsj0_eval('./data/wsj0/id_list/tt.pkl',
                 audio_root = audio_root,
                 pre_load = False)
-        self.tt_loader = DataLoader(devset,
+        tt_loader = DataLoader(devset,
                 batch_size = self.batch_size,
                 shuffle = False,
                 num_workers = self.num_workers)
+        return cv_loader, tt_loader
+
+    def load_vctk_data(self):
+
+        audio_root = self.config['data']['vctk_root']
+
+        devset = VCTK_eval('./data/vctk/id_list/cv.pkl',
+                audio_root = audio_root,
+                pre_load = False)
+        cv_loader = DataLoader(devset,
+                batch_size = self.batch_size,
+                shuffle = False,
+                num_workers = self.num_workers)
+
+        testset = VCTK_eval('./data/vctk/id_list/tt.pkl',
+                audio_root = audio_root,
+                pre_load = False)
+        tt_loader = DataLoader(devset,
+                batch_size = self.batch_size,
+                shuffle = False,
+                num_workers = self.num_workers)
+        return cv_loader, tt_loader
 
     def set_model(self, state_dict):
         self.model = ConvTasNet(self.tr_config['model']).to(DEV)
@@ -91,11 +97,33 @@ class Tester(Solver):
 
     def exec(self):
         self.print_info()
-        #self.evaluate(self.cv_loader)
-        self.evaluate(self.tt_loader, 'tt')
 
-    def evaluate(self, loader, dset):
         self.model.eval()
+        dsets = self.config['data']['dsets']
+
+        result_dict = {}
+
+        for dset in dsets:
+            if dset == 'wsj0':
+                cv_loader, tt_loader = self.load_wsj0_data()
+                sdr0 = load_mix_sdr('./data/wsj0/mix_sdr/', ['cv', 'tt'])
+            elif dset == 'vctk':
+                cv_loader, tt_loader = self.load_vctk_data()
+                sdr0 = load_mix_sdr('./data/vctk/mix_sdr/', ['cv', 'tt'])
+
+            result_dict[dset] = {}
+
+            r = self.evaluate(cv_loader, 'cv', sdr0)
+            result_dict[dset]['cv'] = r
+
+            r = self.evaluate(tt_loader, 'tt', sdr0)
+            result_dict[dset]['tt'] = r
+
+        result_dict['tr_config'] = self.tr_config
+        rname = os.path.join(self.result_dir, 'result.json')
+        json.dump(result_dict, open(rname, 'w'), indent = 1)
+
+    def evaluate(self, loader, dset, sdr0):
         total_loss = 0.
         total_SISNRi = 0
         total_SDR = 0
@@ -132,12 +160,9 @@ class Tester(Solver):
 
         total_loss /= total_cnt
         total_SDR /= total_cnt
-        total_SDRi = total_SDR - self.sdr0[dset]
+        total_SDRi = total_SDR - sdr0[dset]
         total_SISNRi /= total_cnt
 
         result = { 'total_loss': total_loss, 'total_SDRi': total_SDRi, 'total_SISNRi': total_SISNRi }
-        print(result)
-
-        rname = os.path.join(self.result_dir, 'result.json')
-        json.dump(result, open(rname, 'w'))
+        return result
 
