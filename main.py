@@ -54,6 +54,11 @@ if __name__ == '__main__':
             from src.train_uns import Trainer as Solver
         else:
             pass
+    elif mode == 'semi':
+        if not args.test:
+            from src.train_semi import Trainer as Solver
+        else:
+            pass
     elif mode == 'debug':
         from src.train_debug import Trainer as Solver
     else:
