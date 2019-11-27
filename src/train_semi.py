@@ -216,8 +216,12 @@ class Trainer(Solver):
         self.G.train()
         for step in tqdm(range(self.start_step, self.total_steps), ncols = NCOL):
 
+            # supervised
             self.train_sup_once(step, self.wsj0_gen)
-            self.train_gan_once(step, self.vctk_gen)
+
+            # semi part
+            self.train_dis_once(step, self.vctk_gen)
+            self.train_gen_once(step, self.vctk_gen)
 
             if step % self.valid_step == 0 and step != 0:
                 self.G.eval()
@@ -242,11 +246,6 @@ class Trainer(Solver):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.G.parameters(), self.G_grad_clip)
         self.g_optim.step()
-
-    def train_gan_once(self, step, data_gen):
-
-        self.train_dis_once(step, data_gen)
-        self.train_gen_once(step, data_gen)
 
     def train_dis_once(self, step, data_gen):
         # assert batch_size is even
@@ -353,7 +352,7 @@ class Trainer(Solver):
 
                 total_loss += loss.item()
 
-        total_loss = total_loss / len(self.tr_loader)
+        total_loss = total_loss / len(loader)
         self.writer.add_scalar('valid/pit_loss', total_loss, self.valid_time)
 
         valid_score = {}
