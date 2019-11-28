@@ -23,6 +23,7 @@ from src.vctk import VCTK
 from src.discriminator import RWD
 from src.MSD import MultiScaleDiscriminator
 from src.scheduler import RampScheduler
+from src.gradient_penalty import calc_gradient_penalty
 
 class Trainer(Solver):
 
@@ -61,6 +62,9 @@ class Trainer(Solver):
 
         self.g_iters = config['solver']['g_iters']
         self.d_iters = config['solver']['d_iters']
+
+        self.adv_loss = config['solver']['adv_loss']
+        self.gp_lambda = config['solver']['gp_lambda']
 
         self.load_data()
         self.set_model()
@@ -276,6 +280,7 @@ class Trainer(Solver):
         # assert batch_size is even
 
         total_d_loss = 0.
+        total_gp = 0.
         for _ in range(self.d_iters):
 
             # fake sample
@@ -296,8 +301,12 @@ class Trainer(Solver):
 
             d_fake_loss = 0.
             d_fakes = self.D(remix)
-            for d_fake in d_fakes:
-                d_fake_loss += F.relu(1.0 + d_fake).mean()
+            if self.adv_loss == 'wgan-gp':
+                for d_fake in d_fakes:
+                    d_fake_loss += d_fake.mean()
+            elif self.adv_loss == 'hinge':
+                for d_fake in d_fakes:
+                    d_fake_loss += F.relu(1.0 + d_fake).mean()
 
             # true sample
             sample = data_gen.__next__()
@@ -305,13 +314,25 @@ class Trainer(Solver):
 
             d_real_loss = 0.
             d_reals = self.D(padded_mixture)
-            for d_real in d_reals:
-                d_real_loss += F.relu(1.0 - d_real).mean()
+            if self.adv_loss == 'wgan-gp':
+                for d_real in d_reals:
+                    d_real_loss += (- d_real.mean())
+            elif self.adv_loss == 'hinge':
+                for d_real in d_reals:
+                    d_real_loss += F.relu(1.0 - d_real).mean()
 
             d_loss = d_real_loss + d_fake_loss
 
+            if self.adv_loss == 'wgan-gp':
+                gp = calc_gradient_penalty(self.D, remix, padded_mixture)
+                _d_loss = d_loss + self.gp_lambda * gp
+
+                total_gp += gp.item()
+            else:
+                _d_loss = d_loss
+
             self.d_optim.zero_grad()
-            d_loss.backward()
+            _d_loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(self.D.parameters(), self.D_grad_clip)
             if math.isnan(grad_norm):
                 print('Error : grad norm is NaN @ step '+str(step))
@@ -321,7 +342,12 @@ class Trainer(Solver):
             total_d_loss += d_loss.item()
 
         total_d_loss /= self.d_iters
+        total_gp /= self.d_iters
+
         self.writer.add_scalar('train/d_loss', total_d_loss, step)
+
+        if self.adv_loss == 'wgan-gp':
+            self.writer.add_scalar('train/gradient_penalty', total_gp, step)
 
     def train_gen_once(self, step, data_gen):
         # Only remain gan now
