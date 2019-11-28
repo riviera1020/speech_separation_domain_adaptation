@@ -200,6 +200,11 @@ class Trainer(Solver):
                                               Lg_config['start_value'],
                                               Lg_config['end_value'])
 
+    def log_meta(self, meta, dset):
+        for key in meta:
+            value = meta[key]
+            name = f'{dset}_{key}'
+            self.writer.add_scalar(f'valid/{name}', value, self.valid_time)
 
     def exec(self):
         #TODO
@@ -225,9 +230,29 @@ class Trainer(Solver):
 
             if step % self.valid_step == 0 and step != 0:
                 self.G.eval()
-                self.valid(self.wsj0_cv_loader, step)
-                self.valid(self.vctk_cv_loader, step)
+                wsj0_meta = self.valid(self.wsj0_cv_loader, step)
+                vctk_meta = self.valid(self.vctk_cv_loader, step)
                 self.G.train()
+
+                # Do saving
+                self.log_meta(wsj0_meta, 'wsj0')
+                self.log_meta(vctk_meta, 'vctk')
+
+                model_name = f'{step}.pth'
+                valid_score = { 'wsj0': wsj0_meta, 'vctk': vctk_meta }
+                info_dict = { 'step': step, 'valid_score': valid_score }
+                info_dict['g_optim'] = self.g_optim.state_dict()
+                info_dict['d_optim'] = self.d_optim.state_dict()
+                info_dict['D_state_dict'] = self.D.state_dict()
+
+                # TODO, use vctk_loss as save crit
+                save_crit = vctk_meta['valid_loss']
+                self.saver.update(self.G, save_crit, model_name, info_dict)
+
+                model_name = 'latest.pth'
+                self.saver.force_save(self.G, model_name, info_dict)
+
+                self.valid_time += 1
 
     def train_sup_once(self, step, data_gen):
 
@@ -302,6 +327,7 @@ class Trainer(Solver):
         # Only remain gan now
 
         total_g_loss = 0.
+        weighted_g_loss = 0.
         for _ in range(self.g_iters):
 
             sample = data_gen.__next__()
@@ -332,11 +358,16 @@ class Trainer(Solver):
                 self.g_optim.step()
 
             total_g_loss += g_loss.item()
+            weighted_g_loss += _g_loss.item()
 
+        total_g_loss /= self.g_iters
+        weighted_g_loss /= self.g_iters
         self.writer.add_scalar('train/g_loss', total_g_loss, step)
+        self.writer.add_scalar('train/weighted_g_loss', weighted_g_loss, step)
 
     def valid(self, loader, step):
         total_loss = 0.
+        total_snr = 0.
 
         with torch.no_grad():
             for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
@@ -351,28 +382,13 @@ class Trainer(Solver):
                     cal_loss(padded_source, estimate_source, mixture_lengths)
 
                 total_loss += loss.item()
+                total_snr += max_snr.mean().item()
 
         total_loss = total_loss / len(loader)
-        self.writer.add_scalar('valid/pit_loss', total_loss, self.valid_time)
+        total_snr = total_snr / len(loader)
 
-        valid_score = {}
-        valid_score['valid_loss'] = total_loss
+        meta = {}
+        meta['valid_loss'] = total_loss
+        meta['valid_snr'] = total_snr
 
-        model_name = f'{step}.pth'
-        info_dict = { 'step': step, 'valid_score': valid_score, 'config': self.config }
-        info_dict['g_optim'] = self.g_optim.state_dict()
-        info_dict['d_optim'] = self.d_optim.state_dict()
-        info_dict['D_state_dict'] = self.D.state_dict()
-
-        self.saver.update(self.G, total_loss, model_name, info_dict)
-
-        model_name = 'latest.pth'
-        self.saver.force_save(self.G, model_name, info_dict)
-
-        if self.use_scheduler:
-            if self.scheduler_type == 'ReduceLROnPlateau':
-                self.lr_scheduler.step(total_loss)
-            #elif self.scheduler_type in [ 'FlatCosine', 'CosineWarmup' ]:
-            #    self.lr_scheduler.step(epoch)
-
-        self.valid_time += 1
+        return meta
