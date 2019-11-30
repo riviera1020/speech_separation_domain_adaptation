@@ -22,7 +22,7 @@ from src.dataset import wsj0
 from src.vctk import VCTK
 from src.discriminator import RWD
 from src.MSD import MultiScaleDiscriminator
-from src.scheduler import RampScheduler
+from src.scheduler import RampScheduler, ConstantScheduler
 from src.gradient_penalty import calc_gradient_penalty
 
 class Trainer(Solver):
@@ -174,6 +174,13 @@ class Trainer(Solver):
             info_dict = torch.load(pretrained)
             self.G.load_state_dict(info_dict['state_dict'])
 
+            print('Load pretrained model')
+            if 'epoch' in info_dict:
+                print(f"Epochs: {info_dict['epoch']}")
+            elif 'step' in info_dict:
+                print(f"Steps : {info_dict['step']}")
+            print(info_dict['valid_score'])
+
         model_path = self.config['solver']['resume']
         if model_path != '':
             print('Resuming Training')
@@ -203,6 +210,9 @@ class Trainer(Solver):
                                               Lg_config['end_step'],
                                               Lg_config['start_value'],
                                               Lg_config['end_value'])
+        elif Lg_config['function'] == 'constant':
+            self.Lg_scheduler = ConstantScheduler(Lg_config['value'])
+
 
     def log_meta(self, meta, dset):
         for key in meta:
@@ -222,6 +232,14 @@ class Trainer(Solver):
 
     def train_jointly(self):
 
+        # Log initial performance
+        self.G.eval()
+        wsj0_meta = self.valid(self.wsj0_cv_loader)
+        vctk_meta = self.valid(self.vctk_cv_loader)
+        self.log_meta(wsj0_meta, 'wsj0')
+        self.log_meta(vctk_meta, 'vctk')
+        self.valid_time += 1
+
         self.G.train()
         for step in tqdm(range(self.start_step, self.total_steps), ncols = NCOL):
 
@@ -234,8 +252,8 @@ class Trainer(Solver):
 
             if step % self.valid_step == 0 and step != 0:
                 self.G.eval()
-                wsj0_meta = self.valid(self.wsj0_cv_loader, step)
-                vctk_meta = self.valid(self.vctk_cv_loader, step)
+                wsj0_meta = self.valid(self.wsj0_cv_loader)
+                vctk_meta = self.valid(self.vctk_cv_loader)
                 self.G.train()
 
                 # Do saving
@@ -391,7 +409,7 @@ class Trainer(Solver):
         self.writer.add_scalar('train/g_loss', total_g_loss, step)
         self.writer.add_scalar('train/weighted_g_loss', weighted_g_loss, step)
 
-    def valid(self, loader, step):
+    def valid(self, loader):
         total_loss = 0.
         total_snr = 0.
 

@@ -23,3 +23,10 @@ class RampScheduler(object):
             return self.ev
         else:
             return self.s * (step - self.ss) + self.sv
+
+class ConstantScheduler(object):
+    def __init__(self, value):
+        self.v = value
+
+    def value(self, step):
+        return self.v
