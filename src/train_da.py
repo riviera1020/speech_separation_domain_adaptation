@@ -217,8 +217,8 @@ class Trainer(Solver):
             self.train_sup_one_epoch(epoch)
 
             self.G.eval()
-            wsj0_meta = self.valid(self.wsj0_cv_loader)
-            vctk_meta = self.valid(self.vctk_cv_loader)
+            wsj0_meta = self.valid(self.wsj0_cv_loader, self.src_label)
+            vctk_meta = self.valid(self.vctk_cv_loader, self.tgt_label)
             self.G.train()
 
             # Do saving
@@ -249,6 +249,8 @@ class Trainer(Solver):
 
         total_snr_loss = 0.
         total_domain_loss = 0.
+        total_domain_acc = 0.
+        cnt = 0
         for i, sup_sample in enumerate(tqdm(self.wsj0_tr_loader, ncols = NCOL)):
 
             p = float(i + epoch * len(self.wsj0_tr_loader)) / self.epochs / len(self.wsj0_tr_loader)
@@ -294,21 +296,33 @@ class Trainer(Solver):
 
             self.optim.step()
 
+            src_acc = (domain_out.argmax(dim = -1) == self.src_label).float().sum()
+            tgt_acc = (uns_domain_out.argmax(dim = -1) == self.tgt_label).float().sum()
+            cnt += domain_out.size(0) + uns_domain_out.size(0)
+
             self.writer.add_scalar('train/iter_snr_loss', loss.item(), self.step)
             self.writer.add_scalar('train/iter_domain_loss', dloss.item()+uns_loss.item(), self.step)
+            self.writer.add_scalar('train/iter_domain_acc', (src_acc + tgt_acc) / (domain_out.size(0) + uns_domain_out.size(0)), self.step)
             self.step += 1
 
             total_snr_loss += loss.item()
             total_domain_loss += (dloss.item() + uns_loss.item())
+            total_domain_acc += (src_acc + tgt_acc)
+            cnt += domain_out.size(0) + uns_domain_out.size(0)
 
         total_snr_loss = total_snr_loss / len(self.wsj0_tr_loader)
         total_domain_loss = total_domain_loss / len(self.wsj0_tr_loader)
+        total_domain_acc = total_domain_acc / cnt
+
         self.writer.add_scalar('train/epoch_snr_loss', total_snr_loss, epoch)
         self.writer.add_scalar('train/epoch_domain_loss', total_domain_loss, epoch)
+        self.writer.add_scalar('train/epoch_domain_acc', total_domain_acc, epoch)
 
-    def valid(self, loader):
+    def valid(self, loader, label):
         total_loss = 0.
         total_snr = 0.
+        total_domain_acc = 0.
+        cnt = 0
 
         with torch.no_grad():
             for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
@@ -317,8 +331,8 @@ class Trainer(Solver):
                 padded_source = sample['ref'].to(DEV)
                 mixture_lengths = sample['ilens'].to(DEV)
 
-                # TODO, cal domain acc
-                estimate_source, _ = self.G(padded_mixture)
+                estimate_source, feature = self.G(padded_mixture)
+                domain_out = self.D(feature, 0.)
 
                 loss, max_snr, estimate_source, reorder_estimate_source = \
                     cal_loss(padded_source, estimate_source, mixture_lengths)
@@ -326,11 +340,23 @@ class Trainer(Solver):
                 total_loss += loss.item()
                 total_snr += max_snr.mean().item()
 
+                if len(domain_out.size()) == 3:
+                    domain_out = domain_out.permute(0, 2, 1)
+                    B, T, C = domain_out.size()
+                    domain_out = domain_out.contiguous().view(B * T, -1)
+
+                pred = domain_out.argmax(dim = -1)
+                acc = (pred == label).float().sum()
+                cnt += pred.size(0)
+                total_domain_acc += acc
+
         total_loss = total_loss / len(loader)
         total_snr = total_snr / len(loader)
+        total_domain_acc = total_domain_acc / cnt
 
         meta = {}
         meta['valid_loss'] = total_loss
         meta['valid_snr'] = total_snr
+        meta['total_domain_acc'] = total_domain_acc
 
         return meta
