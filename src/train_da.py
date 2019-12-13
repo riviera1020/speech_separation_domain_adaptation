@@ -23,7 +23,7 @@ from src.dataset import wsj0
 from src.vctk import VCTK
 from src.discriminator import RWD
 from src.MSD import MultiScaleDiscriminator
-from src.scheduler import RampScheduler, ConstantScheduler
+from src.scheduler import RampScheduler, ConstantScheduler, DANNScheduler
 from src.gradient_penalty import calc_gradient_penalty
 
 class Trainer(Solver):
@@ -201,6 +201,19 @@ class Trainer(Solver):
                         patience = patience,
                         verbose = True)
 
+        alpha_config = self.config['solver']['alpha_scheduler']
+        if alpha_config['function'] == 'ramp':
+            self.alpha_scheduler = RampScheduler(alpha_config['start_step'],
+                                                 alpha_config['end_step'],
+                                                 alpha_config['start_value'],
+                                                 alpha_config['end_value'])
+        elif alpha_config['function'] == 'constant':
+            self.alpha_scheduler = ConstantScheduler(alpha_config['value'])
+        elif alpha_config['function'] == 'DANN':
+            total_step = self.epochs * len(self.wsj0_tr_loader)
+            self.alpha_scheduler = DANNScheduler(alpha_config['gamma'],
+                                                 alpha_config['scale'],
+                                                 total_step)
 
     def log_meta(self, meta, dset):
         for key in meta:
@@ -253,8 +266,8 @@ class Trainer(Solver):
         cnt = 0
         for i, sup_sample in enumerate(tqdm(self.wsj0_tr_loader, ncols = NCOL)):
 
-            p = float(i + epoch * len(self.wsj0_tr_loader)) / self.epochs / len(self.wsj0_tr_loader)
-            alpha = 2. / (1. + np.exp(-10 * p)) - 1
+            step = float(i + epoch * len(self.wsj0_tr_loader))
+            alpha = self.alpha_scheduler.value(step)
 
             padded_mixture = sup_sample['mix'].to(DEV)
             padded_source = sup_sample['ref'].to(DEV)

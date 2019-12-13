@@ -1,4 +1,4 @@
-
+import numpy as np
 
 class RampScheduler(object):
 
@@ -30,3 +30,16 @@ class ConstantScheduler(object):
 
     def value(self, step):
         return self.v
+
+class DANNScheduler(object):
+    def __init__(self, gamma, scale, total_step):
+        self.gamma = gamma
+        self.scale = scale
+        self.total_step = total_step
+
+    def value(self, step):
+
+        p = float(step) / self.total_step
+        alpha = 2. / (1. + np.exp(-10 * p)) - 1
+
+        return self.scale * alpha
