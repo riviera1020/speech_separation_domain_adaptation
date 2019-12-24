@@ -214,6 +214,20 @@ class Trainer(Solver):
         elif Lg_config['function'] == 'constant':
             self.Lg_scheduler = ConstantScheduler(Lg_config['value'])
 
+        self.use_scheduler = False
+        if 'scheduler' in self.config['solver']:
+            self.use_scheduler = self.config['solver']['scheduler']['use']
+            self.scheduler_type = self.config['solver']['scheduler']['type']
+
+            if self.scheduler_type == 'ReduceLROnPlateau':
+                patience = self.config['solver']['scheduler']['patience']
+                self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                        self.g_optim,
+                        mode = 'min',
+                        factor = 0.5,
+                        patience = patience,
+                        verbose = True)
+
 
     def log_meta(self, meta, dset):
         for key in meta:
@@ -256,6 +270,10 @@ class Trainer(Solver):
                 wsj0_meta = self.valid(self.wsj0_cv_loader)
                 vctk_meta = self.valid(self.vctk_cv_loader)
                 self.G.train()
+
+                if self.use_scheduler:
+                    if self.scheduler_type == 'ReduceLROnPlateau':
+                        self.lr_scheduler.step(wsj0_meta['valid_loss'])
 
                 # Do saving
                 self.log_meta(wsj0_meta, 'wsj0')

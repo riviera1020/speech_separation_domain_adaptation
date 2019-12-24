@@ -61,7 +61,7 @@ class Tester(Solver):
         testset = wsj0_eval('./data/wsj0/id_list/tt.pkl',
                 audio_root = audio_root,
                 pre_load = False)
-        tt_loader = DataLoader(devset,
+        tt_loader = DataLoader(testset,
                 batch_size = self.batch_size,
                 shuffle = False,
                 num_workers = self.num_workers)
@@ -82,7 +82,7 @@ class Tester(Solver):
         testset = VCTK_eval('./data/vctk/id_list/tt.pkl',
                 audio_root = audio_root,
                 pre_load = False)
-        tt_loader = DataLoader(devset,
+        tt_loader = DataLoader(testset,
                 batch_size = self.batch_size,
                 shuffle = False,
                 num_workers = self.num_workers)
