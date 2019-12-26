@@ -6,8 +6,11 @@ from src.utils import DEV
 
 def calc_gradient_penalty(D, real_data, fake_data):
 
-    B, T = real_data.size()
-    alpha = torch.rand(B, 1)
+    B = real_data.size(0)
+    if real_data.dim() == 2:
+        alpha = torch.rand(B, 1)
+    elif real_data.dim() == 3:
+        alpha = torch.rand(B, 1, 1)
     alpha = alpha.expand_as(real_data)
     alpha = alpha.to(DEV)
 

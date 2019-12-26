@@ -63,7 +63,12 @@ if __name__ == '__main__':
         if not args.test:
             from src.train_da import Trainer as Solver
         else:
-            from src.test_semi import Tester as Solver
+            pass
+    elif mode == 'dagan':
+        if not args.test:
+            from src.train_dagan import Trainer as Solver
+        else:
+            pass
     elif mode == 'debug':
         from src.train_debug import Trainer as Solver
     else:
