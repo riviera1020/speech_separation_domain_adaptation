@@ -63,6 +63,7 @@ class Trainer(Solver):
         self.g_iters = config['solver']['g_iters']
         self.d_iters = config['solver']['d_iters']
 
+        self.adv_loss = config['solver']['adv_loss']
         self.gp_lambda = config['solver']['gp_lambda']
 
         self.load_data()
@@ -162,6 +163,16 @@ class Trainer(Solver):
             exit()
         return opt
 
+    def set_scheduler(self, sch_config):
+        if sch_config['function'] == 'ramp':
+            return RampScheduler(sch_config['start_step'],
+                                 sch_config['end_step'],
+                                 sch_config['start_value'],
+                                 sch_config['end_value'])
+        elif sch_config['function'] == 'constant':
+            return ConstantScheduler(sch_config['value'])
+
+
     def set_model(self):
 
         self.G = DAConvTasNet(self.config['model']['gen']).to(DEV)
@@ -196,14 +207,8 @@ class Trainer(Solver):
                 optim_dict = info_dict['d_optim']
                 self.d_optim.load_state_dict(optim_dict)
 
-        Lg_config = self.config['solver']['Lg_scheduler']
-        if Lg_config['function'] == 'ramp':
-            self.Lg_scheduler = RampScheduler(Lg_config['start_step'],
-                                              Lg_config['end_step'],
-                                              Lg_config['start_value'],
-                                              Lg_config['end_value'])
-        elif Lg_config['function'] == 'constant':
-            self.Lg_scheduler = ConstantScheduler(Lg_config['value'])
+        self.Lg_scheduler = self.set_scheduler(self.config['solver']['Lg_scheduler'])
+        self.Ld_scheduler = self.set_scheduler(self.config['solver']['Ld_scheduler'])
 
         self.use_scheduler = False
         if 'scheduler' in self.config['solver']:
@@ -239,8 +244,8 @@ class Trainer(Solver):
 
             if step % self.valid_step == 0 and step != 0:
                 self.G.eval()
-                wsj0_meta = self.valid(self.wsj0_cv_loader)
-                vctk_meta = self.valid(self.vctk_cv_loader)
+                wsj0_meta = self.valid(self.wsj0_cv_loader, 0)
+                vctk_meta = self.valid(self.vctk_cv_loader, 1)
                 self.G.train()
 
                 if self.use_scheduler:
@@ -290,6 +295,7 @@ class Trainer(Solver):
         # assert batch_size is even
 
         total_d_loss = 0.
+        weighted_d_loss = 0.
         total_gp = 0.
         for _ in range(self.d_iters):
 
@@ -300,7 +306,10 @@ class Trainer(Solver):
             with torch.no_grad():
                 _, src_feat = self.G(src_mixture)
 
-            d_fake_loss = self.D(src_feat).mean()
+            if self.adv_loss == 'wgan-gp':
+                d_fake_loss = self.D(src_feat).mean()
+            elif self.adv_loss == 'gan':
+                d_fake_loss = -(1 - F.logsigmoid(self.D(src_feat))).mean()
 
             # true(tgt) sample
             sample = tgt_gen.__next__()
@@ -309,28 +318,40 @@ class Trainer(Solver):
             with torch.no_grad():
                 _, tgt_feat = self.G(tgt_mixture)
 
-            d_real_loss = - self.D(tgt_feat).mean()
+            if self.adv_loss == 'wgan-gp':
+                d_real_loss = - self.D(tgt_feat).mean()
+            elif self.adv_loss == 'gan':
+                d_real_loss = - F.logsigmoid(self.D(tgt_feat)).mean()
 
             d_loss = d_real_loss + d_fake_loss
 
-            gp = calc_gradient_penalty(self.D, tgt_feat, src_feat)
-            d_loss = d_loss + self.gp_lambda * gp
+            if self.adv_loss == 'wgan-gp':
+                gp = calc_gradient_penalty(self.D, tgt_feat, src_feat)
+                d_lambda = self.Ld_scheduler.value(step)
+                d_loss = d_loss + self.gp_lambda * gp
+                total_gp += gp.item()
+
+            d_lambda = self.Ld_scheduler.value(step)
+            _d_loss = d_lambda * d_loss
+
+            total_d_loss += d_loss.item()
+            weighted_d_loss += _d_loss.item()
 
             self.d_optim.zero_grad()
-            d_loss.backward()
+            _d_loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(self.D.parameters(), self.D_grad_clip)
             if math.isnan(grad_norm):
                 print('Error : grad norm is NaN @ step '+str(step))
             else:
                 self.d_optim.step()
 
-            total_d_loss += d_loss.item()
-
         total_d_loss /= self.d_iters
+        weighted_d_loss /= self.d_iters
         total_gp /= self.d_iters
 
         self.writer.add_scalar('train/d_loss', total_d_loss, step)
-        self.writer.add_scalar('train/gradient_penalty', total_gp, step)
+        if self.adv_loss == 'wgan-gp':
+            self.writer.add_scalar('train/gradient_penalty', total_gp, step)
 
     def train_gen_once(self, step, src_gen, tgt_gen):
         # Only remain gan now
@@ -345,7 +366,10 @@ class Trainer(Solver):
 
             _, src_feat = self.G(src_mixture)
 
-            g_fake_loss = self.D(src_feat).mean()
+            if self.adv_loss == 'wgan-gp':
+                g_fake_loss = - self.D(src_feat).mean()
+            elif self.adv_loss == 'gan':
+                g_fake_loss = - F.logsigmoid(self.D(src_feat)).mean()
 
             # true(tgt) sample
             sample = tgt_gen.__next__()
@@ -353,9 +377,12 @@ class Trainer(Solver):
 
             _, tgt_feat = self.G(tgt_mixture)
 
-            g_real_loss = - self.D(tgt_feat).mean()
+            if self.adv_loss == 'wgan-gp':
+                g_real_loss = self.D(tgt_feat).mean()
+            elif self.adv_loss == 'gan':
+                g_real_loss = F.logsigmoid(self.D(tgt_feat)).mean()
 
-            g_loss = -(g_real_loss + g_fake_loss)
+            g_loss = g_real_loss + g_fake_loss
             g_lambda = self.Lg_scheduler.value(step)
             _g_loss = g_loss * g_lambda
 
@@ -376,9 +403,11 @@ class Trainer(Solver):
         self.writer.add_scalar('train/weighted_g_loss', weighted_g_loss, step)
 
 
-    def valid(self, loader):
+    def valid(self, loader, label):
         total_loss = 0.
         total_snr = 0.
+        domain_acc = 0.
+        cnt = 0
 
         with torch.no_grad():
             for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
@@ -392,14 +421,23 @@ class Trainer(Solver):
                 loss, max_snr, estimate_source, reorder_estimate_source = \
                     cal_loss(padded_source, estimate_source, mixture_lengths)
 
+                if self.adv_loss != 'wgan-gp':
+                    dp = (F.sigmoid(self.D(feature)) >= 0.5).int()
+                    cnt += dp.numel()
+
+                    acc_num = (dp == label).int().sum().item()
+                    domain_acc += float(acc_num)
+
                 total_loss += loss.item()
                 total_snr += max_snr.mean().item()
 
         total_loss = total_loss / len(loader)
         total_snr = total_snr / len(loader)
+        domain_acc = domain_acc / cnt
 
         meta = {}
         meta['valid_loss'] = total_loss
         meta['valid_snr'] = total_snr
+        meta['valid_domain_acc'] = domain_acc
 
         return meta
