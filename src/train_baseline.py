@@ -67,10 +67,8 @@ class Trainer(Solver):
         if 'dset' in self.config['data']:
             dset = self.config['data']['dset']
 
-        if dset == 'wsj0':
-            self.load_wsj0_data()
-        elif dset == 'vctk':
-            self.load_vctk_data()
+        self.load_wsj0_data()
+        self.load_vctk_data()
 
     def load_wsj0_data(self):
 
@@ -83,7 +81,7 @@ class Trainer(Solver):
                 pre_load = False,
                 one_chunk_in_utt = True,
                 mode = 'tr')
-        self.tr_loader = DataLoader(trainset,
+        self.vctk_tr_loader = DataLoader(trainset,
                 batch_size = self.batch_size,
                 shuffle = True,
                 num_workers = self.num_workers)
@@ -121,7 +119,7 @@ class Trainer(Solver):
                 pre_load = False,
                 one_chunk_in_utt = False,
                 mode = 'cv')
-        self.cv_loader = DataLoader(devset,
+        self.vctk_cv_loader = DataLoader(devset,
                 batch_size = self.batch_size,
                 shuffle = False,
                 num_workers = self.num_workers)
@@ -194,6 +192,7 @@ class Trainer(Solver):
         for epoch in tqdm(range(self.start_epoch, self.epochs), ncols = NCOL):
             self.train_one_epoch(epoch)
             self.valid(self.cv_loader, epoch)
+            self.valid(self.vctk_cv_loader, epoch, no_save = True)
 
     def train_one_epoch(self, epoch):
         self.model.train()
@@ -223,7 +222,7 @@ class Trainer(Solver):
         total_loss = total_loss / len(self.tr_loader)
         self.writer.add_scalar('train/epoch_loss', total_loss, epoch)
 
-    def valid(self, loader, epoch):
+    def valid(self, loader, epoch, no_save = False):
         # TODO, only check loss now?
         self.model.eval()
         total_loss = 0.
@@ -247,6 +246,9 @@ class Trainer(Solver):
 
         valid_score = {}
         valid_score['valid_loss'] = total_loss
+
+        if no_save:
+            return
 
         model_name = f'{epoch}.pth'
         info_dict = { 'epoch': epoch, 'valid_score': valid_score, 'config': self.config }
