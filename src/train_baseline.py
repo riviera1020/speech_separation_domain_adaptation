@@ -191,8 +191,8 @@ class Trainer(Solver):
     def exec(self):
         for epoch in tqdm(range(self.start_epoch, self.epochs), ncols = NCOL):
             self.train_one_epoch(epoch)
-            self.valid(self.cv_loader, epoch)
-            self.valid(self.vctk_cv_loader, epoch, no_save = True)
+            self.valid(self.cv_loader, epoch, prefix = 'wsj0')
+            self.valid(self.vctk_cv_loader, epoch, no_save = True, prefix = 'vctk')
 
     def train_one_epoch(self, epoch):
         self.model.train()
@@ -222,10 +222,11 @@ class Trainer(Solver):
         total_loss = total_loss / len(self.tr_loader)
         self.writer.add_scalar('train/epoch_loss', total_loss, epoch)
 
-    def valid(self, loader, epoch, no_save = False):
+    def valid(self, loader, epoch, no_save = False, prefix = ""):
         # TODO, only check loss now?
         self.model.eval()
         total_loss = 0.
+        total_snr = 0.
 
         with torch.no_grad():
             for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
@@ -240,9 +241,11 @@ class Trainer(Solver):
                     cal_loss(padded_source, estimate_source, mixture_lengths)
 
                 total_loss += loss.item()
+                total_snr += max_snr.item()
 
         total_loss = total_loss / len(self.tr_loader)
-        self.writer.add_scalar('valid/epoch_loss', total_loss, epoch)
+        self.writer.add_scalar(f'valid/{prefix}_epoch_loss', total_loss, epoch)
+        self.writer.add_scalar(f'valid/{prefix}_epoch_snr', total_loss, epoch)
 
         valid_score = {}
         valid_score['valid_loss'] = total_loss
