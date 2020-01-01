@@ -190,7 +190,7 @@ class Trainer(Solver):
 
     def exec(self):
         for epoch in tqdm(range(self.start_epoch, self.epochs), ncols = NCOL):
-            #self.train_one_epoch(epoch)
+            self.train_one_epoch(epoch)
             self.valid(self.cv_loader, epoch, prefix = 'wsj0')
             self.valid(self.vctk_cv_loader, epoch, no_save = True, prefix = 'vctk')
 
