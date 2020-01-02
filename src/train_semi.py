@@ -65,6 +65,8 @@ class Trainer(Solver):
 
         self.adv_loss = config['solver']['adv_loss']
         self.gp_lambda = config['solver']['gp_lambda']
+        self.Lc_lambda = config['solver']['Lc_lambda']
+        #self.Le_lambda = config['solver']['Le_lambda']
 
         self.load_data()
         self.set_model()
@@ -415,7 +417,9 @@ class Trainer(Solver):
         # Only remain gan now
 
         total_g_loss = 0.
-        weighted_g_loss = 0.
+        total_gan_loss = 0.
+        total_Le = 0.
+        total_Lc = 0.
         for _ in range(self.g_iters):
 
             sample = data_gen.__next__()
@@ -443,8 +447,22 @@ class Trainer(Solver):
                 for g_fake in g_fakes:
                     g_loss += ((g_fake - 1) ** 2).mean()
 
+            # TODO, better Le?
+            Le = (padded_mixture.unsqueeze(1) * estimate_source).sum(dim = -1)
+            Le = (Le ** 2).sum(dim = -1).mean()
+
+            Lc = 0.
+            if self.Lc_lambda > 0:
+                estimate_source = self.G(remix)
+                y1, y2 = torch.chunk(estimate_source, 2, dim = 0)
+
+                reremix1 = (y1 + y2).view(-1, T)
+                reremix2 = (y1 + y2.flip(dims = [1])).view(-1, T)
+
+                Lc = cal_norm(padded_mixture, reremix1, reremix2)
+
             g_lambda = self.Lg_scheduler.value(step)
-            _g_loss = g_loss * g_lambda
+            _g_loss = g_lambda * (g_loss + self.Lc_lambda * Lc)
 
             self.g_optim.zero_grad()
             _g_loss.backward()
@@ -454,13 +472,21 @@ class Trainer(Solver):
             else:
                 self.g_optim.step()
 
-            total_g_loss += g_loss.item()
-            weighted_g_loss += _g_loss.item()
+            total_g_loss += _g_loss.item()
+            total_gan_loss += g_loss.item()
+            total_Le += Le.item()
+            if self.Lc_lambda > 0:
+                total_Lc += Lc.item()
 
         total_g_loss /= self.g_iters
-        weighted_g_loss /= self.g_iters
-        self.writer.add_scalar('train/g_loss', total_g_loss, step)
-        self.writer.add_scalar('train/weighted_g_loss', weighted_g_loss, step)
+        total_gan_loss /= self.g_iters
+        total_Lc /= self.g_iters
+        total_Le /= self.g_iters
+
+        self.writer.add_scalar('train/total_g_loss', total_g_loss, step)
+        self.writer.add_scalar('train/g_loss', total_gan_loss, step)
+        self.writer.add_scalar('train/Le_loss', total_Le, step)
+        self.writer.add_scalar('train/Lc_loss', total_Lc, step)
 
     def valid(self, loader):
         total_loss = 0.
