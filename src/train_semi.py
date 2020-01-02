@@ -158,6 +158,15 @@ class Trainer(Solver):
             exit()
         return opt
 
+    def set_scheduler(self, sch_config):
+        if sch_config['function'] == 'ramp':
+            return RampScheduler(sch_config['start_step'],
+                                 sch_config['end_step'],
+                                 sch_config['start_value'],
+                                 sch_config['end_value'])
+        elif sch_config['function'] == 'constant':
+            return ConstantScheduler(sch_config['value'])
+
     def set_model(self):
         self.G = ConvTasNet(self.config['model']['gen']).to(DEV)
 
@@ -169,6 +178,9 @@ class Trainer(Solver):
 
         self.g_optim = self.set_optim(self.G, self.config['g_optim'])
         self.d_optim = self.set_optim(self.D, self.config['d_optim'])
+
+        if self.adv_loss == 'gan':
+            self.bce_loss = nn.BCEWithLogitsLoss().to(DEV)
 
         pretrained = self.config['solver']['pretrained']
         if pretrained != '':
@@ -205,14 +217,8 @@ class Trainer(Solver):
                 optim_dict = info_dict['d_optim']
                 self.d_optim.load_state_dict(optim_dict)
 
-        Lg_config = self.config['solver']['Lg_scheduler']
-        if Lg_config['function'] == 'ramp':
-            self.Lg_scheduler = RampScheduler(Lg_config['start_step'],
-                                              Lg_config['end_step'],
-                                              Lg_config['start_value'],
-                                              Lg_config['end_value'])
-        elif Lg_config['function'] == 'constant':
-            self.Lg_scheduler = ConstantScheduler(Lg_config['value'])
+        self.Lg_scheduler = self.set_scheduler(self.config['solver']['Lg_scheduler'])
+        self.Ld_scheduler = self.set_scheduler(self.config['solver']['Ld_scheduler'])
 
         self.use_scheduler = False
         if 'scheduler' in self.config['solver']:
@@ -248,12 +254,12 @@ class Trainer(Solver):
     def train_jointly(self):
 
         # Log initial performance
-        self.G.eval()
-        wsj0_meta = self.valid(self.wsj0_cv_loader)
-        vctk_meta = self.valid(self.vctk_cv_loader)
-        self.log_meta(wsj0_meta, 'wsj0')
-        self.log_meta(vctk_meta, 'vctk')
-        self.valid_time += 1
+        #self.G.eval()
+        #wsj0_meta = self.valid(self.wsj0_cv_loader)
+        #vctk_meta = self.valid(self.vctk_cv_loader)
+        #self.log_meta(wsj0_meta, 'wsj0')
+        #self.log_meta(vctk_meta, 'vctk')
+        #self.valid_time += 1
 
         self.G.train()
         for step in tqdm(range(self.start_step, self.total_steps), ncols = NCOL):
@@ -317,6 +323,7 @@ class Trainer(Solver):
         # assert batch_size is even
 
         total_d_loss = 0.
+        weighted_d_loss = 0.
         total_gp = 0.
         for _ in range(self.d_iters):
 
@@ -344,6 +351,14 @@ class Trainer(Solver):
             elif self.adv_loss == 'hinge':
                 for d_fake in d_fakes:
                     d_fake_loss += F.relu(1.0 + d_fake).mean()
+            elif self.adv_loss == 'gan':
+                for d_fake in d_fakes:
+                    d_fake_loss += self.bce_loss(d_fake,
+                                                 torch.zeros_like(d_fake))
+            elif self.adv_loss == 'lsgan':
+                for d_fake in d_fakes:
+                    d_fake_loss += (d_fake ** 2).mean()
+
 
             # true sample
             sample = data_gen.__next__()
@@ -357,16 +372,25 @@ class Trainer(Solver):
             elif self.adv_loss == 'hinge':
                 for d_real in d_reals:
                     d_real_loss += F.relu(1.0 - d_real).mean()
+            elif self.adv_loss == 'gan':
+                for d_real in d_reals:
+                    d_real_loss += self.bce_loss(d_real,
+                                                 torch.ones_like(d_real))
+            elif self.adv_loss == 'lsgan':
+                for d_real in d_reals:
+                    d_real_loss += ((d_real - 1) ** 2).mean()
 
             d_loss = d_real_loss + d_fake_loss
 
             if self.adv_loss == 'wgan-gp':
                 gp = calc_gradient_penalty(self.D, remix, padded_mixture)
                 _d_loss = d_loss + self.gp_lambda * gp
-
                 total_gp += gp.item()
             else:
                 _d_loss = d_loss
+
+            d_lambda = self.Ld_scheduler.value(step)
+            _d_loss = d_lambda * d_loss
 
             self.d_optim.zero_grad()
             _d_loss.backward()
@@ -377,12 +401,13 @@ class Trainer(Solver):
                 self.d_optim.step()
 
             total_d_loss += d_loss.item()
+            weighted_d_loss += _d_loss.item()
 
         total_d_loss /= self.d_iters
+        weighted_d_loss /= self.d_iters
         total_gp /= self.d_iters
 
         self.writer.add_scalar('train/d_loss', total_d_loss, step)
-
         if self.adv_loss == 'wgan-gp':
             self.writer.add_scalar('train/gradient_penalty', total_gp, step)
 
@@ -406,8 +431,17 @@ class Trainer(Solver):
             g_fakes = self.D(remix)
 
             g_loss = 0.
-            for g_fake in g_fakes:
-                g_loss += (- g_fake.mean())
+
+            if self.adv_loss == 'wgan-gp' or 'hinge':
+                for g_fake in g_fakes:
+                    g_loss += (- g_fake.mean())
+            elif self.adv_loss == 'gan':
+                for g_fake in g_fakes:
+                    g_loss += self.bce_loss(g_fake,
+                                            torch.ones_like(g_fake))
+            elif self.adv_loss == 'lsgan':
+                for g_fake in g_fakes:
+                    g_loss += ((g_fake - 1) ** 2).mean()
 
             g_lambda = self.Lg_scheduler.value(step)
             _g_loss = g_loss * g_lambda
