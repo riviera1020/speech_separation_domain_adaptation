@@ -256,12 +256,12 @@ class Trainer(Solver):
     def train_jointly(self):
 
         # Log initial performance
-        #self.G.eval()
-        #wsj0_meta = self.valid(self.wsj0_cv_loader)
-        #vctk_meta = self.valid(self.vctk_cv_loader)
-        #self.log_meta(wsj0_meta, 'wsj0')
-        #self.log_meta(vctk_meta, 'vctk')
-        #self.valid_time += 1
+        self.G.eval()
+        wsj0_meta = self.valid(self.wsj0_cv_loader)
+        vctk_meta = self.valid(self.vctk_cv_loader)
+        self.log_meta(wsj0_meta, 'wsj0')
+        self.log_meta(vctk_meta, 'vctk')
+        self.valid_time += 1
 
         self.G.train()
         for step in tqdm(range(self.start_step, self.total_steps), ncols = NCOL):
