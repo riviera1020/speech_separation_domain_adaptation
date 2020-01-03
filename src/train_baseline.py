@@ -63,12 +63,25 @@ class Trainer(Solver):
 
     def load_data(self):
 
+        # Set training dataset
         dset = 'wsj0'
         if 'dset' in self.config['data']:
             dset = self.config['data']['dset']
+        self.dset = dset
 
         self.load_wsj0_data()
         self.load_vctk_data()
+
+        self.dsets = {
+                'wsj0': {
+                    'tr': self.wsj0_tr_loader,
+                    'cv': self.wsj0_cv_loader,
+                    },
+                'vctk': {
+                    'tr': self.vctk_tr_loader,
+                    'cv': self.vctk_cv_loader,
+                    },
+                }
 
     def load_wsj0_data(self):
 
@@ -81,7 +94,7 @@ class Trainer(Solver):
                 pre_load = False,
                 one_chunk_in_utt = True,
                 mode = 'tr')
-        self.vctk_tr_loader = DataLoader(trainset,
+        self.wsj0_tr_loader = DataLoader(trainset,
                 batch_size = self.batch_size,
                 shuffle = True,
                 num_workers = self.num_workers)
@@ -92,7 +105,7 @@ class Trainer(Solver):
                 pre_load = False,
                 one_chunk_in_utt = False,
                 mode = 'cv')
-        self.cv_loader = DataLoader(devset,
+        self.wsj0_cv_loader = DataLoader(devset,
                 batch_size = self.batch_size,
                 shuffle = False,
                 num_workers = self.num_workers)
@@ -108,7 +121,7 @@ class Trainer(Solver):
                 pre_load = False,
                 one_chunk_in_utt = True,
                 mode = 'tr')
-        self.tr_loader = DataLoader(trainset,
+        self.vctk_tr_loader = DataLoader(trainset,
                 batch_size = self.batch_size,
                 shuffle = True,
                 num_workers = self.num_workers)
@@ -190,15 +203,22 @@ class Trainer(Solver):
 
     def exec(self):
         for epoch in tqdm(range(self.start_epoch, self.epochs), ncols = NCOL):
-            self.train_one_epoch(epoch)
-            self.valid(self.cv_loader, epoch, prefix = 'wsj0')
-            self.valid(self.vctk_cv_loader, epoch, no_save = True, prefix = 'vctk')
 
-    def train_one_epoch(self, epoch):
+            self.train_one_epoch(epoch, self.dsets[self.dset]['tr'])
+
+            # Valid training dataset
+            self.valid(self.dsets[self.dset]['cv'], epoch, prefix = self.dset)
+
+            # Valid not training dataset
+            for dset in self.dsets:
+                if dset != self.dset:
+                    self.valid(self.dsets[dset]['cv'], epoch, no_save = True, prefix = dset)
+
+    def train_one_epoch(self, epoch, tr_loader):
         self.model.train()
         total_loss = 0.
 
-        for i, sample in enumerate(tqdm(self.tr_loader, ncols = NCOL)):
+        for i, sample in enumerate(tqdm(tr_loader, ncols = NCOL)):
 
             padded_mixture = sample['mix'].to(DEV)
             padded_source = sample['ref'].to(DEV)
@@ -219,7 +239,7 @@ class Trainer(Solver):
             self.writer.add_scalar('train/iter_loss', loss.item(), self.step)
             self.step += 1
 
-        total_loss = total_loss / len(self.tr_loader)
+        total_loss = total_loss / len(tr_loader)
         self.writer.add_scalar('train/epoch_loss', total_loss, epoch)
 
     def valid(self, loader, epoch, no_save = False, prefix = ""):
@@ -243,8 +263,8 @@ class Trainer(Solver):
                 total_loss += loss.item()
                 total_snr += max_snr.sum().item()
 
-        total_loss = total_loss / len(self.tr_loader)
-        total_snr = total_snr / len(self.tr_loader)
+        total_loss = total_loss / len(loader)
+        total_snr = total_snr / len(loader)
         self.writer.add_scalar(f'valid/{prefix}_epoch_loss', total_loss, epoch)
         self.writer.add_scalar(f'valid/{prefix}_epoch_snr', total_snr, epoch)
 
