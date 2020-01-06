@@ -106,7 +106,8 @@ class Trainer(Solver):
         self.wsj0_tr_loader = DataLoader(trainset,
                 batch_size = self.batch_size,
                 shuffle = True,
-                num_workers = self.num_workers)
+                num_workers = self.num_workers,
+                drop_last = True)
 
         devset = wsj0('./data/wsj0/id_list/cv.pkl',
                 audio_root = audio_root,
@@ -133,7 +134,8 @@ class Trainer(Solver):
         self.vctk_tr_loader = DataLoader(trainset,
                 batch_size = self.batch_size,
                 shuffle = True,
-                num_workers = self.num_workers)
+                num_workers = self.num_workers,
+                drop_last = True)
 
         devset = VCTK('./data/vctk/id_list/cv.pkl',
                 audio_root = audio_root,
