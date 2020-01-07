@@ -74,6 +74,11 @@ if __name__ == '__main__':
             from src.train_mixup import Trainer as Solver
         else:
             pass
+    elif mode == 'vat':
+        if not args.test:
+            from src.train_vat import Trainer as Solver
+        else:
+            pass
     elif mode == 'debug':
         from src.train_debug import Trainer as Solver
     else:
