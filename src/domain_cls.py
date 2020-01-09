@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from src.misc import apply_norm
+from src.conv_tasnet import TemporalConvNet
 
 class AvgLayer(nn.Module):
     def __init__(self):
@@ -11,6 +12,45 @@ class AvgLayer(nn.Module):
         x : B, C, T
         """
         x = x.mean(dim = -1)
+        return x
+
+class LSTMClassifer(nn.Module):
+    def __init__(self, B, config):
+        super(LSTMClassifer, self).__init__()
+
+        self.B = B
+        self.num_layers = config['layers']
+        self.hidden_size = config['hidden_size']
+        self.dropout = config['dropout']
+
+        self.rnns = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        self.drops = nn.ModuleList()
+
+        for l in range(self.num_layers):
+
+            if l == 0:
+                in_dim = self.B
+            else:
+                in_dim = self.hidden_size * 2
+
+            self.rnns.append(
+                    nn.LSTM(in_dim, self.hidden_size, 1, batch_first = True, bidirectional = True))
+            self.drops.append(nn.Dropout(self.dropout))
+            self.norms.append(nn.LayerNorm(self.hidden_size*2))
+
+        self.out = nn.Linear(self.hidden_size * 2, 1)
+
+    def forward(self, x):
+
+        x = x.permute(0, 2, 1)
+        for l in range(self.num_layers):
+            x, _ = self.rnns[l](x)
+            x = self.norms[l](x)
+            x = self.drops[l](x)
+
+        x = x[:, -1, :]
+        x = self.out(x)
         return x
 
 class DomainClassifier(nn.Module):
@@ -79,6 +119,10 @@ class DomainClassifier(nn.Module):
                 in_channel = out_channel
 
             self.network = nn.Sequential(*network)
+
+        elif mtype == 'LSTM':
+            in_channel = B
+            self.network = LSTMClassifer(B, config)
 
         elif mtype == 'linear':
             raise NotImplementedError

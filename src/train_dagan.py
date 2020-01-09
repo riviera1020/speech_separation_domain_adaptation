@@ -59,6 +59,7 @@ class Trainer(Solver):
         self.num_workers = config['solver']['num_workers']
         self.valid_step = config['solver']['valid_step']
         self.valid_time = 0
+        self.pretrain_d_step = config['solver'].get('pretrain_d_step', 0)
 
         self.g_iters = config['solver']['g_iters']
         self.d_iters = config['solver']['d_iters']
@@ -181,8 +182,9 @@ class Trainer(Solver):
         self.g_optim = self.set_optim([self.G], self.config['g_optim'])
         self.d_optim = self.set_optim([self.D], self.config['d_optim'])
 
-        #self.src_label = torch.Tensor([0]).long().to(DEV)
-        #self.tgt_label = torch.Tensor([1]).long().to(DEV)
+        self.bce_loss = nn.BCEWithLogitsLoss()
+        self.src_label = torch.FloatTensor([0]).to(DEV)
+        self.tgt_label = torch.FloatTensor([1]).to(DEV)
 
         model_path = self.config['solver']['resume']
         if model_path != '':
@@ -233,6 +235,9 @@ class Trainer(Solver):
     def exec(self):
 
         self.G.train()
+        for step in tqdm(range(0, self.pretrain_d_step), ncols = NCOL):
+            self.train_dis_once(step, self.wsj0_gen, self.vctk_gen, pretrain = True)
+
         for step in tqdm(range(self.start_step, self.total_steps), ncols = NCOL):
 
             # supervised
@@ -244,8 +249,8 @@ class Trainer(Solver):
 
             if step % self.valid_step == 0 and step != 0:
                 self.G.eval()
-                wsj0_meta = self.valid(self.wsj0_cv_loader, 0)
-                vctk_meta = self.valid(self.vctk_cv_loader, 1)
+                wsj0_meta = self.valid(self.wsj0_cv_loader, self.src_label)
+                vctk_meta = self.valid(self.vctk_cv_loader, self.tgt_label)
                 self.G.train()
 
                 if self.use_scheduler:
@@ -291,12 +296,19 @@ class Trainer(Solver):
         torch.nn.utils.clip_grad_norm_(self.G.parameters(), self.G_grad_clip)
         self.g_optim.step()
 
-    def train_dis_once(self, step, src_gen, tgt_gen):
+    def train_dis_once(self, step, src_gen, tgt_gen, pretrain = False):
         # assert batch_size is even
+
+        if pretrain:
+            prefix = 'pretrain_'
+        else:
+            prefix = ''
 
         total_d_loss = 0.
         weighted_d_loss = 0.
         total_gp = 0.
+        domain_acc = 0.
+        cnt = 0
         for _ in range(self.d_iters):
 
             # fake(src) sample
@@ -309,7 +321,14 @@ class Trainer(Solver):
             if self.adv_loss == 'wgan-gp':
                 d_fake_loss = self.D(src_feat).mean()
             elif self.adv_loss == 'gan':
-                d_fake_loss = -(1 - F.logsigmoid(self.D(src_feat))).mean()
+                d_fake_out = self.D(src_feat)
+                d_fake_loss = self.bce_loss(d_fake_out,
+                                            self.src_label.expand_as(d_fake_out))
+                with torch.no_grad():
+                    src_dp = ((F.sigmoid(d_fake_out) >= 0.5).float() == self.src_label).float()
+                    domain_acc += src_dp.sum().item()
+                    cnt += src_dp.numel()
+                    self.writer.add_scalar(f'train/{prefix}dis_src_domain_acc', src_dp.mean().item(), step)
 
             # true(tgt) sample
             sample = tgt_gen.__next__()
@@ -321,7 +340,14 @@ class Trainer(Solver):
             if self.adv_loss == 'wgan-gp':
                 d_real_loss = - self.D(tgt_feat).mean()
             elif self.adv_loss == 'gan':
-                d_real_loss = - F.logsigmoid(self.D(tgt_feat)).mean()
+                d_real_out = self.D(tgt_feat)
+                d_real_loss = self.bce_loss(d_real_out,
+                                            self.tgt_label.expand_as(d_real_out))
+                with torch.no_grad():
+                    tgt_dp = ((F.sigmoid(d_real_out) >= 0.5).float() == self.tgt_label).float()
+                    domain_acc += tgt_dp.sum().item()
+                    cnt += tgt_dp.numel()
+                    self.writer.add_scalar(f'train/{prefix}dis_tgt_domain_acc', tgt_dp.mean().item(), step)
 
             d_loss = d_real_loss + d_fake_loss
 
@@ -349,15 +375,20 @@ class Trainer(Solver):
         weighted_d_loss /= self.d_iters
         total_gp /= self.d_iters
 
-        self.writer.add_scalar('train/d_loss', total_d_loss, step)
+        self.writer.add_scalar(f'train/{prefix}d_loss', total_d_loss, step)
         if self.adv_loss == 'wgan-gp':
-            self.writer.add_scalar('train/gradient_penalty', total_gp, step)
+            self.writer.add_scalar(f'train/{prefix}gradient_penalty', total_gp, step)
+        elif self.adv_loss == 'gan':
+            domain_acc = domain_acc / cnt
+            self.writer.add_scalar(f'train/{prefix}dis_domain_acc', domain_acc, step)
 
     def train_gen_once(self, step, src_gen, tgt_gen):
         # Only remain gan now
 
         total_g_loss = 0.
         weighted_g_loss = 0.
+        domain_acc = 0.
+        cnt = 0
         for _ in range(self.g_iters):
 
             # fake(src) sample
@@ -369,7 +400,13 @@ class Trainer(Solver):
             if self.adv_loss == 'wgan-gp':
                 g_fake_loss = - self.D(src_feat).mean()
             elif self.adv_loss == 'gan':
-                g_fake_loss = - F.logsigmoid(self.D(src_feat)).mean()
+                g_fake_out = self.D(src_feat)
+                g_fake_loss = self.bce_loss(g_fake_out,
+                                            self.tgt_label.expand_as(g_fake_out))
+                with torch.no_grad():
+                    src_dp = ((F.sigmoid(g_fake_out) >= 0.5).float() == self.src_label).float()
+                    domain_acc += src_dp.sum().item()
+                    cnt += src_dp.numel()
 
             # true(tgt) sample
             sample = tgt_gen.__next__()
@@ -380,7 +417,13 @@ class Trainer(Solver):
             if self.adv_loss == 'wgan-gp':
                 g_real_loss = self.D(tgt_feat).mean()
             elif self.adv_loss == 'gan':
-                g_real_loss = F.logsigmoid(self.D(tgt_feat)).mean()
+                g_real_out = self.D(tgt_feat)
+                g_real_loss = self.bce_loss(g_real_out,
+                                            self.src_label.expand_as(g_real_out))
+                with torch.no_grad():
+                    tgt_dp = ((F.sigmoid(g_real_out) >= 0.5).float() == self.tgt_label).float()
+                    domain_acc += tgt_dp.sum().item()
+                    cnt += tgt_dp.numel()
 
             g_loss = g_real_loss + g_fake_loss
             g_lambda = self.Lg_scheduler.value(step)
@@ -401,7 +444,9 @@ class Trainer(Solver):
         weighted_g_loss /= self.g_iters
         self.writer.add_scalar('train/g_loss', total_g_loss, step)
         self.writer.add_scalar('train/weighted_g_loss', weighted_g_loss, step)
-
+        if self.adv_loss == 'gan':
+            domain_acc = domain_acc / cnt
+            self.writer.add_scalar('train/gen_domain_acc', domain_acc, step)
 
     def valid(self, loader, label):
         total_loss = 0.
@@ -422,10 +467,10 @@ class Trainer(Solver):
                     cal_loss(padded_source, estimate_source, mixture_lengths)
 
                 if self.adv_loss != 'wgan-gp':
-                    dp = (F.sigmoid(self.D(feature)) >= 0.5).int()
+                    dp = (F.sigmoid(self.D(feature)) >= 0.5).float()
                     cnt += dp.numel()
 
-                    acc_num = (dp == label).int().sum().item()
+                    acc_num = (dp == label).sum().item()
                     domain_acc += float(acc_num)
 
                 total_loss += loss.item()
