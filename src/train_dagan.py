@@ -186,6 +186,18 @@ class Trainer(Solver):
         self.src_label = torch.FloatTensor([0]).to(DEV)
         self.tgt_label = torch.FloatTensor([1]).to(DEV)
 
+        pretrained = self.config['solver']['pretrained']
+        if pretrained != '':
+            info_dict = torch.load(pretrained)
+            self.G.load_state_dict(info_dict['state_dict'])
+
+            print('Load pretrained model')
+            if 'epoch' in info_dict:
+                print(f"Epochs: {info_dict['epoch']}")
+            elif 'step' in info_dict:
+                print(f"Steps : {info_dict['step']}")
+            print(info_dict['valid_score'])
+
         model_path = self.config['solver']['resume']
         if model_path != '':
             print('Resuming Training')
@@ -357,7 +369,10 @@ class Trainer(Solver):
                 d_loss = d_loss + self.gp_lambda * gp
                 total_gp += gp.item()
 
-            d_lambda = self.Ld_scheduler.value(step)
+            if pretrain:
+                d_lambda = 1
+            else:
+                d_lambda = self.Ld_scheduler.value(step)
             _d_loss = d_lambda * d_loss
 
             total_d_loss += d_loss.item()
