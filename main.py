@@ -81,6 +81,8 @@ if __name__ == '__main__':
             pass
     elif mode == 'debug':
         from src.train_debug import Trainer as Solver
+    elif mode == 'freeze':
+        from src.train_freeze import Trainer as Solver
     else:
         print('Not imp')
         exit()
