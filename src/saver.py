@@ -5,7 +5,7 @@ from functools import cmp_to_key
 
 class Saver(object):
 
-    def __init__(self, max_save_num, save_dir, keep):
+    def __init__(self, max_save_num, save_dir, keep, resume = False, resume_score_fn = None):
         # keep: min, max
         assert keep in ['min', 'max']
 
@@ -19,9 +19,31 @@ class Saver(object):
         else:
             self.reverse = False
 
+        if resume:
+            # resume_score_fn: a callable function to get score for sorting
+            if resume_score_fn == None:
+                print('Specify function to get sorting score')
+
+            # exclude latest.pth
+            paths = glob(os.path.join(self.save_dir, '[!latest]*.pth'))
+            save_list = []
+            for path in paths:
+                info_dict = torch.load(path)
+                score = resume_score_fn(info_dict)
+                save_list.append({'score': score, 'path': path})
+            save_list = sorted(save_list, key = lambda x: x['score'], reverse = self.reverse)
+            self.save_list = save_list[:self.max_save_num]
+
     def force_save(self, model, model_name, info_dict = None):
         path = os.path.join(self.save_dir, model_name)
         self.save(model, path, info_dict)
+
+    def logging(self):
+        with open(os.path.join(self.save_dir, 'save.log'), 'w') as f:
+            for item in self.save_list[::-1]:
+                s = item['score']
+                p = item['path']
+                f.write(f'{p}: {s}\n')
 
     def save(self, model, path, info_dict = None):
 
@@ -56,6 +78,8 @@ class Saver(object):
                 self.save_list[0] = { 'score': score, 'path': path }
                 self.save(model, path, info_dict)
                 self.save_list = sorted(self.save_list, key = lambda x: x['score'], reverse = self.reverse)
+
+        self.logging()
 
     @staticmethod
     def simple_comp(x, y):

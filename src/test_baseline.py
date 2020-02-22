@@ -25,7 +25,7 @@ class Tester(Solver):
         super(Tester, self).__init__(config)
 
         self.tr_config = config['solver']['train_config']
-        self.tr_config = yaml.load(open(self.tr_config))
+        self.tr_config = yaml.load(open(self.tr_config), Loader=yaml.FullLoader)
 
         #ts = time.time()
         #st = datetime.datetime.fromtimestamp(ts).strftime('%Y_%m_%d_%H_%M_%S')
@@ -88,6 +88,27 @@ class Tester(Solver):
                 num_workers = self.num_workers)
         return cv_loader, tt_loader
 
+    def load_libri_data(self):
+
+        audio_root = self.config['data']['libri_root']
+
+        devset = wsj0_eval('./data/libri/id_list/cv.pkl',
+                audio_root = audio_root,
+                pre_load = False)
+        cv_loader = DataLoader(devset,
+                batch_size = self.batch_size,
+                shuffle = False,
+                num_workers = self.num_workers)
+
+        testset = wsj0_eval('./data/libri/id_list/tt.pkl',
+                audio_root = audio_root,
+                pre_load = False)
+        tt_loader = DataLoader(testset,
+                batch_size = self.batch_size,
+                shuffle = False,
+                num_workers = self.num_workers)
+        return cv_loader, tt_loader
+
     def set_model(self, state_dict):
         self.model = ConvTasNet(self.tr_config['model']).to(DEV)
         self.model.load_state_dict(state_dict)
@@ -110,6 +131,9 @@ class Tester(Solver):
             elif dset == 'vctk':
                 cv_loader, tt_loader = self.load_vctk_data()
                 sdr0 = load_mix_sdr('./data/vctk/mix_sdr/', ['cv', 'tt'])
+            elif dset == 'libri':
+                cv_loader, tt_loader = self.load_libri_data()
+                sdr0 = load_mix_sdr('./data/libri/mix_sdr/', ['cv', 'tt'])
 
             result_dict[dset] = {}
 

@@ -18,8 +18,8 @@ def set_debug(is_debug):
 
 def read_config(path, local_path):
 
-    config = yaml.load(open(path))
-    path_conf = yaml.load(open(local_path))
+    config = yaml.load(open(path), Loader=yaml.FullLoader)
+    path_conf = yaml.load(open(local_path), Loader=yaml.FullLoader)
 
     for key in path_conf:
         path = path_conf[key]
