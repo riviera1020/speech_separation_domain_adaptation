@@ -1,4 +1,5 @@
 import yaml
+import comet_ml
 import torch
 import random
 import argparse
@@ -36,10 +37,6 @@ if __name__ == '__main__':
             torch.cuda.manual_seed_all(args.seed)
 
     config = read_config(args.config, args.path)
-
-    with open(args.config, 'r') as stream:
-        data = stream.read().replace('\n', '<br/>').replace(' ', '&nbsp; &nbsp;')
-    stream = data
 
     mode = args.mode
     test = args.test
@@ -79,13 +76,17 @@ if __name__ == '__main__':
             from src.train_vat import Trainer as Solver
         else:
             pass
+    elif mode == 'pimt':
+        from src.train_pimt import Trainer as Solver
     elif mode == 'debug':
         from src.train_debug import Trainer as Solver
     elif mode == 'freeze':
         from src.train_freeze import Trainer as Solver
+    elif mode == 'phncls':
+        from src.train_phncls import Trainer as Solver
     else:
         print('Not imp')
         exit()
 
-    s = Solver(config, stream)
+    s = Solver(config)
     s.exec()
