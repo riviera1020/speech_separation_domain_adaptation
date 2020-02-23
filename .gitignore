@@ -2,6 +2,7 @@
 checkpoints/*
 logs/*
 config/path.yaml
+config/*
 src/__pycache__/
 src/data.py
 src/evaluate.py

@@ -172,6 +172,10 @@ class Trainer(Solver):
             # TODO gen teacher model
             pass
 
+        pre_path = self.config['solver'].get('pretrained', '')
+        if pre_path != '':
+            self.load_pretrain(pre_path)
+
         optim_dict = None
         if 'resume' in self.config['solver']:
             model_path = self.config['solver']['resume']
@@ -235,6 +239,21 @@ class Trainer(Solver):
                         factor = 0.5,
                         patience = patience,
                         verbose = True)
+
+    def load_pretrain(self, pre_path):
+        pretrained = self.config['solver']['pretrained']
+        if pretrained != '':
+            info_dict = torch.load(pretrained)
+            print(info_dict['state_dict'].keys())
+            print(self.model.state_dict().keys())
+            self.model.load_state_dict(info_dict['state_dict'])
+
+            print('Load pretrained model')
+            if 'epoch' in info_dict:
+                print(f"Epochs: {info_dict['epoch']}")
+            elif 'step' in info_dict:
+                print(f"Steps : {info_dict['step']}")
+            print(info_dict['valid_score'])
 
     def update_ema(self, model, ema_model, alpha, global_step):
 
