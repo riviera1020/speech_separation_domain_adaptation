@@ -172,11 +172,13 @@ class Trainer(Solver):
             # TODO gen teacher model
             pass
 
+        # TODO, get optim_dict from pretrained and resume
+        # maybe buggy
+        optim_dict = None
         pre_path = self.config['solver'].get('pretrained', '')
         if pre_path != '':
-            self.load_pretrain(pre_path)
+            optim_dict = self.load_pretrain(pre_path)
 
-        optim_dict = None
         if 'resume' in self.config['solver']:
             model_path = self.config['solver']['resume']
             if model_path != '':
@@ -190,9 +192,6 @@ class Trainer(Solver):
 
                 self.model.load_state_dict(info_dict['state_dict'])
                 print('Loading model complete')
-
-                self.ema_model.load_state_dict(info_dict['ema_state_dict'])
-                print('Loading ema_model complete')
 
                 if self.config['solver']['resume_optim']:
                     optim_dict = info_dict['optim']
@@ -241,19 +240,22 @@ class Trainer(Solver):
                         verbose = True)
 
     def load_pretrain(self, pre_path):
-        pretrained = self.config['solver']['pretrained']
-        if pretrained != '':
-            info_dict = torch.load(pretrained)
-            print(info_dict['state_dict'].keys())
-            print(self.model.state_dict().keys())
-            self.model.load_state_dict(info_dict['state_dict'])
+        pretrained_optim = self.config['solver'].get('pretrained_optim', False)
 
-            print('Load pretrained model')
-            if 'epoch' in info_dict:
-                print(f"Epochs: {info_dict['epoch']}")
-            elif 'step' in info_dict:
-                print(f"Steps : {info_dict['step']}")
-            print(info_dict['valid_score'])
+        info_dict = torch.load(pre_path)
+        self.model.load_state_dict(info_dict['state_dict'])
+
+        print('Load pretrained model')
+        if 'epoch' in info_dict:
+            print(f"Epochs: {info_dict['epoch']}")
+        elif 'step' in info_dict:
+            print(f"Steps : {info_dict['step']}")
+        print(info_dict['valid_score'])
+
+        if pretrained_optim:
+            return info_dict['optim']
+        else:
+            return None
 
     def update_ema(self, model, ema_model, alpha, global_step):
 
