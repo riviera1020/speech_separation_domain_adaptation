@@ -1,0 +1,3 @@
+wsj_root: /home/riviera1020/Big/Corpus/wsj0-mix/
+vctk_root: /home/riviera1020/Big/Corpus/vctk-mix/wav8k/min/
+libri_root: /home/riviera1020/Big/Corpus/libri-mix/wav8k/min/
