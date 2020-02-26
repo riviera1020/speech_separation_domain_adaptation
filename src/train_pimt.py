@@ -317,7 +317,8 @@ class Trainer(Solver):
             _, _, score_clean, score_noise = self.model.consistency_forward(padded_mixture, self.transform)
             loss_pi = self.mse_loss(score_clean, score_noise)
 
-            r = self.cal_consistency_weight(epoch, end_ep = self.epochs, end_w = self.pi_lambda)
+            #r = self.cal_consistency_weight(epoch, end_ep = self.epochs, end_w = self.pi_lambda)
+            r = self.pi_lambda
             loss = sup_loss + r * loss_pi
 
             self.opt.zero_grad()
