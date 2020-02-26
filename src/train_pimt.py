@@ -419,7 +419,7 @@ class Trainer(Solver):
                     cal_loss(padded_source, estimate_source, mixture_lengths)
 
                 total_loss += loss.item() * B
-                total_snr += max_snr.sum().item() * B
+                total_snr += max_snr.sum().item()
                 cnt += B
 
         total_loss = total_loss / cnt
