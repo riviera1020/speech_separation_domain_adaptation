@@ -310,6 +310,12 @@ class Trainer(Solver):
 
             sup_loss, max_snr, estimate_source, reorder_estimate_source = \
                 cal_loss(padded_source, estimate_source, mixture_lengths)
+            loss = sup_loss
+
+            self.opt.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+            self.opt.step()
 
             # pi training
             # TODO, use sup_dataset first
@@ -322,7 +328,7 @@ class Trainer(Solver):
 
             #r = self.cal_consistency_weight(epoch, end_ep = self.epochs, end_w = self.pi_lambda)
             r = self.pi_lambda
-            loss = sup_loss + r * loss_pi
+            loss = r * loss_pi
 
             self.opt.zero_grad()
             loss.backward()
