@@ -23,6 +23,7 @@ from src.dataset import wsj0
 from src.vctk import VCTK
 from src.ranger import Ranger
 from src.dashboard import Dashboard
+from src.pimt_utils import PITMSELoss
 
 """
 from src.scheduler import FlatCosineLR, CosineWarmupLR
@@ -166,7 +167,8 @@ class Trainer(Solver):
         self.model = PiMtConvTasNet(self.config['model'])
         self.model = self.model.to(DEV)
 
-        self.mse_loss = nn.MSELoss().to(DEV)
+        #self.mse_loss = nn.MSELoss().to(DEV)
+        self.mse_loss = PITMSELoss().to(DEV)
 
         if self.algo == 'mt':
             # TODO gen teacher model
@@ -310,9 +312,10 @@ class Trainer(Solver):
                 cal_loss(padded_source, estimate_source, mixture_lengths)
 
             # pi training
-            uns_sample = uns_gen.__next__()
-            padded_mixture = uns_sample['mix'].to(DEV)
-            mixture_lengths = uns_sample['ilens'].to(DEV)
+            # TODO, use sup_dataset first
+            #uns_sample = uns_gen.__next__()
+            #padded_mixture = uns_sample['mix'].to(DEV)
+            #mixture_lengths = uns_sample['ilens'].to(DEV)
 
             _, _, score_clean, score_noise = self.model.consistency_forward(padded_mixture, self.transform)
             loss_pi = self.mse_loss(score_clean, score_noise)
