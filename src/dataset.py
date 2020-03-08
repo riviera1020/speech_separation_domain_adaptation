@@ -172,8 +172,13 @@ class wsj0_eval(Dataset):
         self.id_list = []
         for uid in self.data:
             # Same template with wsj0
-            info = [ uid, uid, -1, -1 ]
+            l = self.data[uid]['mix'][1]
+            info = [ uid, uid, 0, l ]
             self.id_list.append(info)
+
+        # sort list so that dataloader load from long to short
+        # also more effiencient when using batch
+        self.id_list.sort(key = lambda x: x[3], reverse = True)
 
         if self.pre_load:
             print('Start pre-loading audio')
@@ -218,13 +223,10 @@ class wsj0_eval(Dataset):
             s2_audio = s2_audio.astype(np.float32)
 
         ilen = len(mix_audio)
-        '''
-        # TODO, pad make SDR worse ?
         if ilen < self.maxlen:
             mix_audio = self.pad_audio(mix_audio, ilen)
             s1_audio = self.pad_audio(s1_audio, ilen)
             s2_audio = self.pad_audio(s2_audio, ilen)
-        '''
 
         sep_audio = np.stack([s1_audio, s2_audio], axis = 0)
 

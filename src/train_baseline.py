@@ -14,10 +14,12 @@ from src.solver import Solver
 from src.saver import Saver
 from src.utils import DEV, DEBUG, NCOL
 from src.conv_tasnet import ConvTasNet
-from src.pit_criterion import cal_loss
-from src.dataset import wsj0
-from src.vctk import VCTK
+from src.pit_criterion import cal_loss, SISNR
+from src.dataset import wsj0, wsj0_eval
 from src.ranger import Ranger
+from src.dprnn import DualRNN
+from src.evaluation import cal_SDR, cal_SISNRi, cal_SISNR
+from src.sep_utils import remove_pad, load_mix_sdr
 
 """
 from src.scheduler import FlatCosineLR, CosineWarmupLR
@@ -37,7 +39,7 @@ class Trainer(Solver):
         save_name = self.exp_name + '-' + st
         self.save_dir = os.path.join(config['solver']['save_dir'], save_name)
         self.safe_mkdir(self.save_dir)
-        self.saver = Saver(config['solver']['max_save_num'], self.save_dir, 'min')
+        self.saver = Saver(config['solver']['max_save_num'], self.save_dir, 'max')
         yaml.dump(config, open(os.path.join(self.save_dir, 'config.yaml'), 'w'),
                 default_flow_style = False ,indent = 4)
 
@@ -99,12 +101,9 @@ class Trainer(Solver):
                 shuffle = True,
                 num_workers = self.num_workers)
 
-        devset = wsj0('./data/wsj0/id_list/cv.pkl',
+        devset = wsj0_eval('./data/wsj0/id_list/cv.pkl',
                 audio_root = audio_root,
-                seg_len = seg_len,
-                pre_load = False,
-                one_chunk_in_utt = False,
-                mode = 'cv')
+                pre_load = False)
         self.wsj0_cv_loader = DataLoader(devset,
                 batch_size = self.batch_size,
                 shuffle = False,
@@ -115,7 +114,7 @@ class Trainer(Solver):
         seg_len = self.config['data']['segment']
         audio_root = self.config['data']['vctk_root']
 
-        trainset = VCTK('./data/vctk/id_list/tr.pkl',
+        trainset = wsj0('./data/vctk/id_list/tr.pkl',
                 audio_root = audio_root,
                 seg_len = seg_len,
                 pre_load = False,
@@ -126,12 +125,9 @@ class Trainer(Solver):
                 shuffle = True,
                 num_workers = self.num_workers)
 
-        devset = VCTK('./data/vctk/id_list/cv.pkl',
+        devset = wsj0_eval('./data/vctk/id_list/cv.pkl',
                 audio_root = audio_root,
-                seg_len = seg_len,
-                pre_load = False,
-                one_chunk_in_utt = False,
-                mode = 'cv')
+                pre_load = False)
         self.vctk_cv_loader = DataLoader(devset,
                 batch_size = self.batch_size,
                 shuffle = False,
@@ -139,6 +135,19 @@ class Trainer(Solver):
 
     def set_model(self):
         self.model = ConvTasNet(self.config['model']).to(DEV)
+        #self.model = DualRNN(self.config['model']).to(DEV)
+
+        pretrained = self.config['solver']['pretrained']
+        if pretrained != '':
+            info_dict = torch.load(pretrained)
+            self.model.load_state_dict(info_dict['state_dict'])
+
+            print('Load pretrained model')
+            if 'epoch' in info_dict:
+                print(f"Epochs: {info_dict['epoch']}")
+            elif 'step' in info_dict:
+                print(f"Steps : {info_dict['step']}")
+            print(info_dict['valid_score'])
 
         optim_dict = None
         if 'resume' in self.config['solver']:
@@ -217,6 +226,8 @@ class Trainer(Solver):
     def train_one_epoch(self, epoch, tr_loader):
         self.model.train()
         total_loss = 0.
+        total_sisnri = 0.
+        cnt = 0
 
         for i, sample in enumerate(tqdm(tr_loader, ncols = NCOL)):
 
@@ -236,17 +247,24 @@ class Trainer(Solver):
 
             total_loss += loss.item()
 
+            with torch.no_grad():
+                mix_sisnr = SISNR(padded_source, padded_mixture, mixture_lengths)
+                total_sisnri += (max_snr - mix_sisnr).sum()
+            cnt += padded_source.size(0)
+
             self.writer.add_scalar('train/iter_loss', loss.item(), self.step)
             self.step += 1
 
-        total_loss = total_loss / len(tr_loader)
+        total_loss = total_loss / cnt
+        total_sisnri = total_sisnri / cnt
         self.writer.add_scalar('train/epoch_loss', total_loss, epoch)
+        self.writer.add_scalar('train/epoch_sisnri', total_sisnri, epoch)
 
     def valid(self, loader, epoch, no_save = False, prefix = ""):
-        # TODO, only check loss now?
         self.model.eval()
         total_loss = 0.
-        total_snr = 0.
+        total_sisnri = 0.
+        cnt = 0
 
         with torch.no_grad():
             for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
@@ -255,21 +273,31 @@ class Trainer(Solver):
                 padded_source = sample['ref'].to(DEV)
                 mixture_lengths = sample['ilens'].to(DEV)
 
+                ml = mixture_lengths.max().item()
+                padded_mixture = padded_mixture[:, :ml]
+                padded_source = padded_source[:, :, :ml]
+
                 estimate_source = self.model(padded_mixture)
 
                 loss, max_snr, estimate_source, reorder_estimate_source = \
                     cal_loss(padded_source, estimate_source, mixture_lengths)
 
-                total_loss += loss.item()
-                total_snr += max_snr.sum().item()
+                mix_sisnr = SISNR(padded_source, padded_mixture, mixture_lengths)
+                max_sisnri = (max_snr - mix_sisnr)
 
-        total_loss = total_loss / len(loader)
-        total_snr = total_snr / len(loader)
+                total_loss += loss.item()
+                total_sisnri += max_sisnri.sum().item()
+                cnt += padded_mixture.size(0)
+
+        total_sisnri = total_sisnri / cnt
+        total_loss = total_loss / cnt
+
         self.writer.add_scalar(f'valid/{prefix}_epoch_loss', total_loss, epoch)
-        self.writer.add_scalar(f'valid/{prefix}_epoch_snr', total_snr, epoch)
+        self.writer.add_scalar(f'valid/{prefix}_epoch_sisnr', total_sisnr, epoch)
 
         valid_score = {}
         valid_score['valid_loss'] = total_loss
+        valid_socre['valid_sisnr'] = total_sisnr
 
         if no_save:
             return
@@ -278,7 +306,7 @@ class Trainer(Solver):
         info_dict = { 'epoch': epoch, 'valid_score': valid_score, 'config': self.config }
         info_dict['optim'] = self.opt.state_dict()
 
-        self.saver.update(self.model, total_loss, model_name, info_dict)
+        self.saver.update(self.model, total_sisnr, model_name, info_dict)
 
         model_name = 'latest.pth'
         self.saver.force_save(self.model, model_name, info_dict)

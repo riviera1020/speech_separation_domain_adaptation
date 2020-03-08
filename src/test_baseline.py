@@ -160,6 +160,10 @@ class Tester(Solver):
                 padded_source = sample['ref'].to(DEV)
                 mixture_lengths = sample['ilens'].to(DEV)
 
+                ml = mixture_lengths.max().item()
+                padded_mixture = padded_mixture[:, :ml]
+                padded_source = padded_source[:, :, :ml]
+
                 estimate_source = self.model(padded_mixture)
 
                 loss, max_snr, estimate_source, reorder_estimate_source = \

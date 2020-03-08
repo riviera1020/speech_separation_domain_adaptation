@@ -15,10 +15,16 @@ def cal_loss(source, estimate_source, source_lengths):
         source: [B, C, T], B is batch size
         estimate_source: [B, C, T]
         source_lengths: [B]
+    Return:
+        loss: [1]
+        max_snr: [B]
+        estimate_source: [B, C, T]
+        reorder_estimate_source: [B, C, T]
     """
     max_snr, perms, max_snr_idx = cal_si_snr_with_pit(source,
                                                       estimate_source,
                                                       source_lengths)
+    max_snr = max_snr.squeeze()
     loss = 0 - torch.mean(max_snr)
     reorder_estimate_source = reorder_source(estimate_source, perms, max_snr_idx)
     return loss, max_snr, estimate_source, reorder_estimate_source
@@ -128,6 +134,40 @@ def get_mask(source, source_lengths):
         mask[i, :, source_lengths[i]:] = 0
     return mask
 
+def SISNR(source, sig, source_lengths):
+    """
+    This sisnr only support no pit sisnr on pytorch
+    Args:
+        source: [B, C, T]
+        sig: [B, T] or [B, C, T]
+    Returns:
+        sisnr: [B]
+    """
+    B, C, T = source.size()
+
+    if len(sig.size()) == 2:
+        # sig is mixture, expand dim
+        sig = sig.unsqueeze(dim = 1).expand(B, C, T)
+    mask = get_mask(source, source_lengths)
+    sig = sig * mask
+
+    num_samples = source_lengths.view(-1, 1, 1).float()  # [B, 1, 1]
+    mean_source = source.sum(dim = -1, keepdim = True) / num_samples
+    mean_sig = sig.sum(dim = -1 , keepdim = True) / num_samples
+
+    source = (source - mean_source) * mask
+    sig = (sig - mean_sig) * mask
+
+    src_energy = (source ** 2).sum(dim = -1, keepdim = True)
+    dot = (sig * source).sum(dim = -1, keepdim = True)
+
+    proj = dot * source / src_energy
+    noise = sig - proj
+
+    ratio = (proj ** 2).sum(dim = -1) / ((noise ** 2).sum(dim = -1) + EPS)
+    sisnr = 10 * torch.log10(ratio + EPS)
+    sisnr = sisnr.mean(dim = -1)
+    return sisnr
 
 if __name__ == "__main__":
     torch.manual_seed(123)
