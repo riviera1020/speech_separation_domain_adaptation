@@ -106,5 +106,15 @@ class PiMtConvTasNet(ConvTasNet):
         est_mask1, score_clean = self.separator(mixture_w)
         est_mask2, score_noise = self.separator(mixture_w_purb)
 
-        return est_mask1, est_mask2, score_clean, score_noise
+        est_source_clean = self.decoder(mixture_w, est_mask1)
+        T_origin = mixture.size(-1)
+        T_conv = est_source_clean.size(-1)
+        est_source_clean = F.pad(est_source_clean, (0, T_origin - T_conv))
+
+        est_source_noise = self.decoder(mixture_w, est_mask2)
+        T_origin = mixture.size(-1)
+        T_conv = est_source_noise.size(-1)
+        est_source_noise = F.pad(est_source_noise, (0, T_origin - T_conv))
+
+        return est_source_clean, est_source_noise, score_clean, score_noise
 

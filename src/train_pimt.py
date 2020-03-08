@@ -18,9 +18,8 @@ from src.solver import Solver
 from src.saver import Saver
 from src.utils import DEV, DEBUG, NCOL, inf_data_gen
 from src.pimt_conv_tasnet import PiMtConvTasNet, SpecTransform
-from src.pit_criterion import cal_loss
-from src.dataset import wsj0
-from src.vctk import VCTK
+from src.pit_criterion import cal_loss, SISNR
+from src.dataset import wsj0, wsj0_eval
 from src.ranger import Ranger
 from src.dashboard import Dashboard
 from src.pimt_utils import PITMSELoss
@@ -43,7 +42,7 @@ class Trainer(Solver):
         save_name = self.exp_name + '-' + st
         self.save_dir = os.path.join(config['solver']['save_dir'], save_name)
         self.safe_mkdir(self.save_dir)
-        self.saver = Saver(config['solver']['max_save_num'], self.save_dir, 'min')
+        self.saver = Saver(config['solver']['max_save_num'], self.save_dir, 'max')
         yaml.dump(config, open(os.path.join(self.save_dir, 'config.yaml'), 'w'),
                 default_flow_style = False ,indent = 4)
 
@@ -65,7 +64,9 @@ class Trainer(Solver):
             exit()
         elif self.pi_conf['use']:
             self.algo = 'pi'
-            self.pi_lambda = self.pi_conf['lambda']
+            self.loss_type = self.pi_conf['loss_type']
+            self.sup_pi_lambda = self.pi_conf['sup_lambda']
+            self.uns_pi_lambda = self.pi_conf['uns_lambda']
         elif self.mt_conf['use']:
             self.algo = 'mt'
             self.mt_lambda = self.mt_conf['lambda']
@@ -124,12 +125,9 @@ class Trainer(Solver):
                 num_workers = self.num_workers,
                 drop_last = True)
 
-        devset = wsj0('./data/wsj0/id_list/cv.pkl',
+        devset = wsj0_eval('./data/wsj0/id_list/cv.pkl',
                 audio_root = audio_root,
-                seg_len = seg_len,
-                pre_load = False,
-                one_chunk_in_utt = False,
-                mode = 'cv')
+                pre_load = False)
         self.wsj0_cv_loader = DataLoader(devset,
                 batch_size = self.batch_size,
                 shuffle = False,
@@ -140,7 +138,7 @@ class Trainer(Solver):
         seg_len = self.config['data']['vctk']['segment']
         audio_root = self.config['data']['vctk_root']
 
-        trainset = VCTK('./data/vctk/id_list/tr.pkl',
+        trainset = wsj0('./data/vctk/id_list/tr.pkl',
                 audio_root = audio_root,
                 seg_len = seg_len,
                 pre_load = False,
@@ -152,12 +150,9 @@ class Trainer(Solver):
                 num_workers = self.num_workers,
                 drop_last = True)
 
-        devset = VCTK('./data/vctk/id_list/cv.pkl',
+        devset = wsj0_eval('./data/vctk/id_list/cv.pkl',
                 audio_root = audio_root,
-                seg_len = seg_len,
-                pre_load = False,
-                one_chunk_in_utt = False,
-                mode = 'cv')
+                pre_load = False)
         self.vctk_cv_loader = DataLoader(devset,
                 batch_size = self.batch_size,
                 shuffle = False,
@@ -295,7 +290,8 @@ class Trainer(Solver):
     def train_pi_model(self, epoch, sup_loader, uns_gen):
         self.model.train()
         total_loss = 0.
-        total_pi = 0.
+        total_pi_sup = 0.
+        total_pi_uns = 0.
         cnt = 0
 
         for i, sample in enumerate(tqdm(sup_loader, ncols = NCOL)):
@@ -314,43 +310,57 @@ class Trainer(Solver):
 
             self.opt.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-            self.opt.step()
+
+            est_source_clean, est_source_noise, score_clean, score_noise = \
+                    self.model.consistency_forward(padded_mixture, self.transform)
+
+            if self.loss_type == 'sisnr':
+                loss_pi_sup, max_snr, estimate_source, reorder_estimate_source = \
+                        cal_loss(est_source_clean, est_source_noise, mixture_lengths)
+            elif self.loss_type == 'mse':
+                loss_pi_sup = self.mse_loss(score_clean, score_noise)
 
             # pi training
-            # TODO, use sup_dataset first
-            #uns_sample = uns_gen.__next__()
-            #padded_mixture = uns_sample['mix'].to(DEV)
-            #mixture_lengths = uns_sample['ilens'].to(DEV)
+            uns_sample = uns_gen.__next__()
+            padded_mixture = uns_sample['mix'].to(DEV)
+            mixture_lengths = uns_sample['ilens'].to(DEV)
 
-            _, _, score_clean, score_noise = self.model.consistency_forward(padded_mixture, self.transform)
-            loss_pi = self.mse_loss(score_clean, score_noise)
+            est_source_clean, est_source_noise, score_clean, score_noise = \
+                    self.model.consistency_forward(padded_mixture, self.transform)
+
+            if self.loss_type == 'sisnr':
+                loss_pi_uns, max_snr, estimate_source, reorder_estimate_source = \
+                        cal_loss(est_source_clean, est_source_noise, mixture_lengths)
+            elif self.loss_type == 'mse':
+                loss_pi_uns = self.mse_loss(score_clean, score_noise)
 
             #r = self.cal_consistency_weight(epoch, end_ep = self.epochs, end_w = self.pi_lambda)
-            r = self.pi_lambda
-            loss = r * loss_pi
+            loss = self.sup_pi_lambda * loss_pi_sup + self.uns_pi_lambda * loss_pi_uns
 
-            self.opt.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
             self.opt.step()
 
             meta = { 'iter_loss': sup_loss.item(),
-                     'iter_pi_loss': loss_pi.item() }
+                     'iter_pi_sup_loss': loss_pi_sup.item(),
+                     'iter_pi_uns_loss': loss_pi_uns.item() }
             self.writer.log_step_info('train', meta)
 
             total_loss += sup_loss.item() * B
-            total_pi += loss_pi.item() * B
+            total_pi_sup += loss_pi_sup.item() * B
+            total_pi_uns += loss_pi_uns.item() * B
             cnt += B
 
             self.step += 1
             self.writer.step()
 
         total_loss = total_loss / cnt
-        total_pi = total_pi / cnt
+        total_pi_sup = total_pi_sup / cnt
+        total_pi_uns = total_pi_uns / cnt
 
         meta = { 'epoch_loss': total_loss,
-                 'epoch_pi_loss': total_pi }
+                 'epoch_pi_sup_loss': total_pi_sup,
+                 'epoch_pi_uns_loss': total_pi_uns }
         self.writer.log_epoch_info('train', meta)
 
     def train_mt(self, epoch, sup_loader, uns_gen):
@@ -412,7 +422,7 @@ class Trainer(Solver):
     def valid(self, loader, epoch, no_save = False, prefix = ""):
         self.model.eval()
         total_loss = 0.
-        total_snr = 0.
+        total_sisnri = 0.
         cnt = 0
 
         with torch.no_grad():
@@ -423,24 +433,32 @@ class Trainer(Solver):
                 mixture_lengths = sample['ilens'].to(DEV)
                 B = padded_mixture.size(0)
 
+                ml = mixture_lengths.max().item()
+                padded_mixture = padded_mixture[:, :ml]
+                padded_source = padded_source[:, :, :ml]
+
                 estimate_source = self.model(padded_mixture)
 
                 loss, max_snr, estimate_source, reorder_estimate_source = \
                     cal_loss(padded_source, estimate_source, mixture_lengths)
 
+                mix_sisnr = SISNR(padded_source, padded_mixture, mixture_lengths)
+                max_sisnri = (max_snr - mix_sisnr)
+
                 total_loss += loss.item() * B
-                total_snr += max_snr.sum().item()
+                total_sisnri += max_sisnri.sum().item()
                 cnt += B
 
         total_loss = total_loss / cnt
-        total_snr = total_snr / cnt
+        total_sisnri = total_sisnri / cnt
 
         meta = { f'{prefix}_epoch_loss': total_loss,
-                 f'{prefix}_epoch_snr': total_snr }
+                 f'{prefix}_epoch_sisnri': total_sisnri }
         self.writer.log_epoch_info('valid', meta)
 
         valid_score = {}
         valid_score['valid_loss'] = total_loss
+        valid_score['valid_sisnri'] = total_sisnri
 
         if no_save:
             return
@@ -449,7 +467,7 @@ class Trainer(Solver):
         info_dict = { 'epoch': epoch, 'valid_score': valid_score, 'config': self.config }
         info_dict['optim'] = self.opt.state_dict()
 
-        self.saver.update(self.model, total_loss, model_name, info_dict)
+        self.saver.update(self.model, total_sisnri, model_name, info_dict)
 
         model_name = 'latest.pth'
         self.saver.force_save(self.model, model_name, info_dict)
