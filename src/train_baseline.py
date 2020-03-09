@@ -7,7 +7,6 @@ import datetime
 import torch
 
 from tqdm import tqdm
-from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 
 from src.solver import Solver
@@ -20,6 +19,7 @@ from src.ranger import Ranger
 from src.dprnn import DualRNN
 from src.evaluation import cal_SDR, cal_SISNRi, cal_SISNR
 from src.sep_utils import remove_pad, load_mix_sdr
+from src.dashboard import Dashboard
 
 """
 from src.scheduler import FlatCosineLR, CosineWarmupLR
@@ -27,7 +27,7 @@ from src.scheduler import FlatCosineLR, CosineWarmupLR
 
 class Trainer(Solver):
 
-    def __init__(self, config, stream = None):
+    def __init__(self, config):
         #def __init__(self, data, model, optimizer, args):
         super(Trainer, self).__init__(config)
 
@@ -46,10 +46,7 @@ class Trainer(Solver):
         log_name = self.exp_name + '-' + st
         self.log_dir = os.path.join(config['solver']['log_dir'], log_name)
         self.safe_mkdir(self.log_dir)
-        self.writer = SummaryWriter(self.log_dir)
-
-        if stream != None:
-            self.writer.add_text('Config', stream)
+        self.writer = Dashboard(log_name, config, self.log_dir)
 
         self.epochs = config['solver']['epochs']
         self.start_epoch = config['solver']['start_epoch']
@@ -64,7 +61,6 @@ class Trainer(Solver):
         self.set_model()
 
     def load_data(self):
-
         # Set training dataset
         dset = 'wsj0'
         if 'dset' in self.config['data']:
@@ -73,6 +69,7 @@ class Trainer(Solver):
 
         self.load_wsj0_data()
         self.load_vctk_data()
+        self.load_libri_data()
 
         self.dsets = {
                 'wsj0': {
@@ -82,6 +79,10 @@ class Trainer(Solver):
                 'vctk': {
                     'tr': self.vctk_tr_loader,
                     'cv': self.vctk_cv_loader,
+                    },
+                'libri': {
+                    'tr': self.libri_tr_loader,
+                    'cv': self.libri_cv_loader,
                     },
                 }
 
@@ -133,11 +134,36 @@ class Trainer(Solver):
                 shuffle = False,
                 num_workers = self.num_workers)
 
+    def load_libri_data(self):
+
+        seg_len = self.config['data']['segment']
+        audio_root = self.config['data']['libri_root']
+
+        trainset = wsj0('./data/libri/id_list/tr.pkl',
+                audio_root = audio_root,
+                seg_len = seg_len,
+                pre_load = False,
+                one_chunk_in_utt = True,
+                mode = 'tr')
+        self.libri_tr_loader = DataLoader(trainset,
+                batch_size = self.batch_size,
+                shuffle = True,
+                num_workers = self.num_workers)
+
+        devset = wsj0_eval('./data/libri/id_list/cv.pkl',
+                audio_root = audio_root,
+                pre_load = False)
+        self.libri_cv_loader = DataLoader(devset,
+                batch_size = self.batch_size,
+                shuffle = False,
+                num_workers = self.num_workers)
+
     def set_model(self):
         self.model = ConvTasNet(self.config['model']).to(DEV)
         #self.model = DualRNN(self.config['model']).to(DEV)
 
-        pretrained = self.config['solver']['pretrained']
+        # pretrained conf is only for debugging
+        pretrained = self.config['solver'].get('pretrained', '')
         if pretrained != '':
             info_dict = torch.load(pretrained)
             self.model.load_state_dict(info_dict['state_dict'])
@@ -223,6 +249,8 @@ class Trainer(Solver):
                 if dset != self.dset:
                     self.valid(self.dsets[dset]['cv'], epoch, no_save = True, prefix = dset)
 
+            self.writer.epoch()
+
     def train_one_epoch(self, epoch, tr_loader):
         self.model.train()
         total_loss = 0.
@@ -245,20 +273,25 @@ class Trainer(Solver):
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
             self.opt.step()
 
-            total_loss += loss.item()
-
+            B = padded_source.size(0)
+            total_loss += loss.item() * B
+            cnt += B
             with torch.no_grad():
                 mix_sisnr = SISNR(padded_source, padded_mixture, mixture_lengths)
                 total_sisnri += (max_snr - mix_sisnr).sum()
-            cnt += padded_source.size(0)
 
-            self.writer.add_scalar('train/iter_loss', loss.item(), self.step)
+            meta = { 'iter_loss': loss.item() }
+            self.writer.log_step_info('train', meta)
+
             self.step += 1
+            self.writer.step()
 
         total_loss = total_loss / cnt
         total_sisnri = total_sisnri / cnt
-        self.writer.add_scalar('train/epoch_loss', total_loss, epoch)
-        self.writer.add_scalar('train/epoch_sisnri', total_sisnri, epoch)
+
+        meta = { 'epoch_loss': total_loss,
+                 'epoch_sisnri': total_sisnri }
+        self.writer.log_epoch_info('train', meta)
 
     def valid(self, loader, epoch, no_save = False, prefix = ""):
         self.model.eval()
@@ -276,6 +309,7 @@ class Trainer(Solver):
                 ml = mixture_lengths.max().item()
                 padded_mixture = padded_mixture[:, :ml]
                 padded_source = padded_source[:, :, :ml]
+                B = padded_source.size(0)
 
                 estimate_source = self.model(padded_mixture)
 
@@ -285,19 +319,20 @@ class Trainer(Solver):
                 mix_sisnr = SISNR(padded_source, padded_mixture, mixture_lengths)
                 max_sisnri = (max_snr - mix_sisnr)
 
-                total_loss += loss.item()
+                total_loss += loss.item() * B
                 total_sisnri += max_sisnri.sum().item()
-                cnt += padded_mixture.size(0)
+                cnt += B
 
         total_sisnri = total_sisnri / cnt
         total_loss = total_loss / cnt
 
-        self.writer.add_scalar(f'valid/{prefix}_epoch_loss', total_loss, epoch)
-        self.writer.add_scalar(f'valid/{prefix}_epoch_sisnr', total_sisnr, epoch)
+        meta = { f'{prefix}_epoch_loss': total_loss,
+                 f'{prefix}_epoch_sisnri': total_sisnri }
+        self.writer.log_epoch_info('valid', meta)
 
         valid_score = {}
         valid_score['valid_loss'] = total_loss
-        valid_socre['valid_sisnr'] = total_sisnr
+        valid_score['valid_sisnri'] = total_sisnri
 
         if no_save:
             return
@@ -306,7 +341,7 @@ class Trainer(Solver):
         info_dict = { 'epoch': epoch, 'valid_score': valid_score, 'config': self.config }
         info_dict['optim'] = self.opt.state_dict()
 
-        self.saver.update(self.model, total_sisnr, model_name, info_dict)
+        self.saver.update(self.model, total_sisnri, model_name, info_dict)
 
         model_name = 'latest.pth'
         self.saver.force_save(self.model, model_name, info_dict)
