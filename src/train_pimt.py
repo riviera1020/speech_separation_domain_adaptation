@@ -56,7 +56,7 @@ class Trainer(Solver):
                     self.save_dir,
                     'min',
                     resume = True,
-                    resume_score_fn = lambda x: x['valid_score'][crit])
+                    resume_score_fn = lambda x: x['valid_score']['valid_sisnri'])
 
             self.writer = Dashboard(exp_name, self.config, self.log_dir, resume=True)
 
@@ -200,7 +200,7 @@ class Trainer(Solver):
 
         optim_dict = None
         if self.resume_model:
-            model_path = self.config['solver']['resume']
+            model_path = os.path.join(self.save_dir, 'latest.pth')
             if model_path != '':
                 print('Resuming Training')
                 print(f'Loading Model: {model_path}')

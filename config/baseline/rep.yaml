@@ -25,7 +25,7 @@ solver:
     save_dir: './checkpoints/'
     max_save_num: 3
     log_dir: './logs/'
-    epochs: 100
+    epochs: 50
     start_epoch: 0
     resume: ""
     resume_optim: ""
