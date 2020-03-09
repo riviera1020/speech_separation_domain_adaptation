@@ -14,22 +14,43 @@ class AddNoise(nn.Module):
         super(AddNoise, self).__init__()
         self.scale = config['scale']
 
-    def forward(self, x):
-        std = x.std()
-        mean = x.mean()
+        # if no batchwise, compute mean, std on diff sample separatly
+        self.batchwise = config.get('batchwise', True)
 
-        noise = torch.normal(mean = mean, std = std, size = x.size()).to(DEV)
+    def forward(self, x):
+
+        if not self.batchwise:
+            if len(x.size()) == 3:
+                B, M, N = x.size()
+                x_flat = x.view(B, -1)
+                std = x_flat.std(dim = -1, keepdim = True)
+                std = std.unsqueeze(-1).expand(B, M, N)
+                mean = x_flat.mean(dim = -1, keepdim = True)
+                mean = std.unsqueeze(-1).expand(B, M, N)
+            elif len(x.size()) == 2:
+                B, T = x.size()
+                std = x.std(dim = -1, keepdim = True).expand(B, T)
+                mean = x.mean(dim = -1, keepdim = True).expand(B, T)
+            noise = torch.normal(mean = mean, std = std).to(DEV)
+        else:
+            std = x.std()
+            mean = x.mean()
+            noise = torch.normal(mean = mean, std = std, size = x.size()).to(DEV)
         return x + noise
 
-class SpecTransform(nn.Module):
+class InputTransform(nn.Module):
     def __init__(self, config):
-        super(SpecTransform, self).__init__()
-
+        super(InputTransform, self).__init__()
         methods = config['methods']
 
+        # where = spec or wav
+        self.where = config.get('where', 'spec')
         self.trans = nn.ModuleList()
         for m in methods:
             if m == 'specaugm':
+                if self.where == 'wav':
+                    print('No specaugm on waveform')
+                    exit()
                 self.trans.append(SpecAugm(config['specaugm']))
             if m == 'noise':
                 self.trans.append(AddNoise(config['noise']))
@@ -100,8 +121,12 @@ class PiMtConvTasNet(ConvTasNet):
         """
         mixture_w = self.encoder(mixture)
 
-        mixture_w_purb = mixture_w.clone().detach()
-        mixture_w_purb = transform(mixture_w_purb)
+        if transform.where == 'wav':
+            mixture_purb = transform(mixture)
+            mixture_w_purb = self.encoder(mixture_purb)
+        elif transform.where == 'spec':
+            mixture_w_purb = mixture_w.clone().detach()
+            mixture_w_purb = transform(mixture_w_purb)
 
         est_mask1, score_clean = self.separator(mixture_w)
         est_mask2, score_noise = self.separator(mixture_w_purb)

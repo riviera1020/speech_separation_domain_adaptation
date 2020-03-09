@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 from src.solver import Solver
 from src.saver import Saver
 from src.utils import DEV, DEBUG, NCOL, inf_data_gen
-from src.pimt_conv_tasnet import PiMtConvTasNet, SpecTransform
+from src.pimt_conv_tasnet import PiMtConvTasNet, InputTransform
 from src.pit_criterion import cal_loss, SISNR
 from src.dataset import wsj0, wsj0_eval
 from src.ranger import Ranger
@@ -93,8 +93,8 @@ class Trainer(Solver):
             self.algo = 'mt'
             self.mt_lambda = self.mt_conf['lambda']
 
-        spec_transform = config['solver']['spec_transform']
-        self.set_transform(spec_transform)
+        input_transform = config['solver']['input_transform']
+        self.set_transform(input_transform)
 
         self.step = 0
         self.valid_times = 0
@@ -102,8 +102,8 @@ class Trainer(Solver):
         self.load_data()
         self.set_model()
 
-    def set_transform(self, spec_transform):
-        self.transform = SpecTransform(spec_transform)
+    def set_transform(self, t_conf):
+        self.transform = InputTransform(t_conf)
 
     def load_data(self):
 
