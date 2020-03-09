@@ -21,7 +21,7 @@ optim:
     weight_decay: 0.0
 
 solver:
-    exp_name: 'reproduce'
+    exp_name: 'debug'
     save_dir: './checkpoints/'
     max_save_num: 3
     log_dir: './logs/'
