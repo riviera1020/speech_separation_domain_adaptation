@@ -39,17 +39,39 @@ class Trainer(Solver):
         ts = time.time()
         st = datetime.datetime.fromtimestamp(ts).strftime('%Y_%m_%d_%H_%M_%S')
 
-        save_name = self.exp_name + '-' + st
-        self.save_dir = os.path.join(config['solver']['save_dir'], save_name)
-        self.safe_mkdir(self.save_dir)
-        self.saver = Saver(config['solver']['max_save_num'], self.save_dir, 'max')
-        yaml.dump(config, open(os.path.join(self.save_dir, 'config.yaml'), 'w'),
-                default_flow_style = False ,indent = 4)
+        self.resume_model = False
+        resume_exp_name = config['solver'].get('resume_exp_name', '')
+        if resume_exp_name:
+            self.resume_model = True
+            exp_name = resume_exp_name
+            self.save_dir = os.path.join(self.config['solver']['save_dir'], exp_name)
+            self.log_dir = os.path.join(self.config['solver']['log_dir'], exp_name)
 
-        log_name = self.exp_name + '-' + st
-        self.log_dir = os.path.join(config['solver']['log_dir'], log_name)
-        self.safe_mkdir(self.log_dir)
-        self.writer = Dashboard(log_name, config, self.log_dir)
+            if not os.path.isdir(self.save_dir) or not os.path.isdir(self.log_dir):
+                print('Resume Exp name Error')
+                exit()
+
+            self.saver = Saver(
+                    self.config['solver']['max_save_num'],
+                    self.save_dir,
+                    'min',
+                    resume = True,
+                    resume_score_fn = lambda x: x['valid_score'][crit])
+
+            self.writer = Dashboard(exp_name, self.config, self.log_dir, resume=True)
+
+        else:
+            save_name = self.exp_name + '-' + st
+            self.save_dir = os.path.join(config['solver']['save_dir'], save_name)
+            self.safe_mkdir(self.save_dir)
+            self.saver = Saver(config['solver']['max_save_num'], self.save_dir, 'max')
+            yaml.dump(config, open(os.path.join(self.save_dir, 'config.yaml'), 'w'),
+                    default_flow_style = False ,indent = 4)
+
+            log_name = self.exp_name + '-' + st
+            self.log_dir = os.path.join(config['solver']['log_dir'], log_name)
+            self.safe_mkdir(self.log_dir)
+            self.writer = Dashboard(log_name, config, self.log_dir)
 
         self.epochs = config['solver']['epochs']
         self.start_epoch = config['solver']['start_epoch']
@@ -176,7 +198,8 @@ class Trainer(Solver):
         if pre_path != '':
             optim_dict = self.load_pretrain(pre_path)
 
-        if 'resume' in self.config['solver']:
+        optim_dict = None
+        if self.resume_model:
             model_path = self.config['solver']['resume']
             if model_path != '':
                 print('Resuming Training')
@@ -185,7 +208,7 @@ class Trainer(Solver):
                 info_dict = torch.load(model_path)
 
                 print(f"Previous score: {info_dict['valid_score']}")
-                self.start_step = info_dict['epoch'] + 1
+                self.start_epoch = info_dict['epoch'] + 1
 
                 self.model.load_state_dict(info_dict['state_dict'])
                 print('Loading model complete')
