@@ -54,7 +54,7 @@ class Trainer(Solver):
             self.saver = Saver(
                     self.config['solver']['max_save_num'],
                     self.save_dir,
-                    'min',
+                    'max',
                     resume = True,
                     resume_score_fn = lambda x: x['valid_score']['valid_sisnri'])
 
@@ -210,11 +210,18 @@ class Trainer(Solver):
                 print(f"Previous score: {info_dict['valid_score']}")
                 self.start_epoch = info_dict['epoch'] + 1
 
+                if 'step' in info_dict:
+                    self.step = info_dict['step']
+
                 self.model.load_state_dict(info_dict['state_dict'])
                 print('Loading model complete')
 
                 if self.config['solver']['resume_optim']:
                     optim_dict = info_dict['optim']
+
+                # dashboard is one-base
+                self.writer.set_epoch(self.start_epoch + 1)
+                self.writer.set_step(self.step + 1)
 
         lr = self.config['optim']['lr']
         weight_decay = self.config['optim']['weight_decay']
@@ -487,7 +494,7 @@ class Trainer(Solver):
             return
 
         model_name = f'{epoch}.pth'
-        info_dict = { 'epoch': epoch, 'valid_score': valid_score, 'config': self.config }
+        info_dict = { 'epoch': epoch, 'step': self.step, 'valid_score': valid_score, 'config': self.config }
         info_dict['optim'] = self.opt.state_dict()
 
         self.saver.update(self.model, total_sisnri, model_name, info_dict)
