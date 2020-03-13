@@ -45,11 +45,13 @@ class Dashboard:
                 self.exp.add_tag("debug")
 
         ##slurm-related, record the jobid
+        '''
         hostname = os.uname()[1]
         if len(hostname.split('.')) == 2 and hostname.split('.')[1] == 'speech':
             self.exp.log_other('jobid', int(os.getenv('PMIX_NAMESPACE').split('.')[2]))
         else:
             self.exp.log_other('jobid', -1)
+        '''
 
     def log_config(self,config):
         #NOTE: depth at most 2
