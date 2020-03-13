@@ -82,6 +82,8 @@ if __name__ == '__main__':
         from src.train_debug import Trainer as Solver
     elif mode == 'freeze':
         from src.train_freeze import Trainer as Solver
+    elif mode == 'perturb':
+        from src.train_perturb import Trainer as Solver
     elif mode == 'phncls':
         from src.train_phncls import Trainer as Solver
     else:

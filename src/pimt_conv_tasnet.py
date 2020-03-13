@@ -31,9 +31,11 @@ class AddNoise(nn.Module):
                 B, T = x.size()
                 std = x.std(dim = -1, keepdim = True).expand(B, T)
                 mean = x.mean(dim = -1, keepdim = True).expand(B, T)
+            std = self.scale * std
             noise = torch.normal(mean = mean, std = std).to(DEV)
         else:
             std = x.std()
+            std = self.scale * std
             mean = x.mean()
             noise = torch.normal(mean = mean, std = std, size = x.size()).to(DEV)
         return x + noise
@@ -111,6 +113,24 @@ class PiMtConvTasNet(ConvTasNet):
         est_source = F.pad(est_source, (0, T_origin - T_conv))
 
         return est_source
+
+    def noise_forward(self, mixture, transform):
+
+        if transform.where == 'wav':
+            mixture = transform(mixture)
+            mixture_w_purb = self.encoder(mixture)
+            mixture_w = mixture_w_purb
+        elif transform.where == 'spec':
+            mixture_w = self.encoder(mixture)
+            mixture_w_purb = transform(mixture_w)
+
+        est_mask, score_noise = self.separator(mixture_w_purb)
+
+        est_source_noise = self.decoder(mixture_w, est_mask)
+        T_origin = mixture.size(-1)
+        T_conv = est_source_noise.size(-1)
+        est_source_noise = F.pad(est_source_noise, (0, T_origin - T_conv))
+        return est_source_noise
 
     def consistency_forward(self, mixture, transform):
         """
