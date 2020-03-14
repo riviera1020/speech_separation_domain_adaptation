@@ -1,18 +1,20 @@
 
 import os
 import random
-
+import math
 import torch
 import numpy as np
+import subprocess
 import soundfile as sf
 import _pickle as cPickle
 
+from io import BytesIO
 from tqdm import tqdm
 from torch.utils.data import Dataset
 
 class wsj0(Dataset):
 
-    def __init__(self, id_list_path, audio_root, seg_len = 4.0, pre_load = True, one_chunk_in_utt = True, mode = 'tr'):
+    def __init__(self, id_list_path, audio_root, seg_len = 4.0, pre_load = True, one_chunk_in_utt = True, mode = 'tr', sp_factors = None):
         """
         Args:
             id_list_path     : id_list from data/wsj0/preprocess.py
@@ -22,6 +24,7 @@ class wsj0(Dataset):
             one_chunk_in_utt : T -> random select one chunk in one utt
                                F -> split and access all chunk, (must false in cv and tt)
             mode             : tr/cv/tt
+            sp_factors       : support speed augm with list of factor [ 0.9, 1.0, 1.1 ]
         """
         super(wsj0, self).__init__()
 
@@ -35,48 +38,47 @@ class wsj0(Dataset):
         self.pre_load = pre_load
         self.one_chunk = one_chunk_in_utt
 
+        if sp_factors != None:
+            if 1.0 not in sp_factors:
+                sp_factors.append(1.0)
+            #TODO, pre_load now is useless, not support
+            if pre_load:
+                print("Error: pre_load don't support speed perturb now")
+                exit()
+        self.sp_factors = sp_factors
+
         self.id_list = []
         drop_num = 0
         drop_len = 0.0
         for uid in self.data:
             path, utt_len = self.data[uid]['mix']
-            if mode == 'tr':
-                if utt_len >= self.seg_len:
-                    if self.one_chunk:
-                        info = [ uid, uid, -1, -1 ]
-                        self.id_list.append(info)
-                    else:
-                        seg_num = utt_len // self.seg_len
-                        if utt_len % self.seg_len > 0:
-                            seg_num += 1
-                        for i in range(seg_num):
-                            s = int(i * self.seg_len)
-                            e = int((i + 1) * self.seg_len)
-                            if i == seg_num - 1:
-                                e = min([e, utt_len])
-                            info = [ uid, f'{uid}_{i}', s, e ]
-                            self.id_list.append(info)
-                else:
-                    drop_num += 1
-                    drop_len += utt_len
-
-            else: # in cv and tt, don't filter short utt
-                seg_num = utt_len // self.seg_len
-                if utt_len % self.seg_len > 0:
-                    seg_num += 1
-                for i in range(seg_num):
-                    s = int(i * self.seg_len)
-                    e = int((i + 1) * self.seg_len)
-                    if i == seg_num - 1:
-                        e = min([e, utt_len])
-                    info = [ uid, f'{uid}_{i}', s, e ]
+            if self.sp_factors != None:
+                # fast speed will shrink the len of audio
+                mf = max(self.sp_factors)
+                utt_len = math.floor(float(utt_len) / mf)
+            if utt_len >= self.seg_len:
+                if self.one_chunk:
+                    info = [ uid, uid, -1, -1 ]
                     self.id_list.append(info)
+                else:
+                    seg_num = utt_len // self.seg_len
+                    if utt_len % self.seg_len > 0:
+                        seg_num += 1
+                    for i in range(seg_num):
+                        s = int(i * self.seg_len)
+                        e = int((i + 1) * self.seg_len)
+                        if i == seg_num - 1:
+                            e = min([e, utt_len])
+                        info = [ uid, f'{uid}_{i}', s, e ]
+                        self.id_list.append(info)
+            else:
+                drop_num += 1
+                drop_len += utt_len
 
-        if mode == 'tr':
-            drop_len = drop_len / (self.sr * 3600)
-            print(f'Drop utt less than {self.seg_len}')
-            print(f'Drop num: {drop_num}')
-            print(f'Drop len: {drop_len:.3f} hr')
+        drop_len = drop_len / (self.sr * 3600)
+        print(f'Drop utt less than {self.seg_len}')
+        print(f'Drop num: {drop_num}')
+        print(f'Drop len: {drop_len:.3f} hr')
 
         if self.pre_load:
             print('Start pre-loading audio')
@@ -95,6 +97,17 @@ class wsj0(Dataset):
         base[:ilen] = audio
         return base
 
+    def load_audio(self, path, factor = 1.0):
+        if factor == 1.0:
+            audio, _ = sf.read(path)
+        else:
+            cmd = f'sox {path} -t wav - speed {factor}'.split()
+            result = subprocess.Popen(args = cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            bio = BytesIO(result.stdout.read())
+            audio, _ = sf.read(bio)
+            bio.close()
+        return audio
+
     def __len__(self):
         return len(self.id_list)
 
@@ -112,9 +125,14 @@ class wsj0(Dataset):
             s1_path = os.path.join(self.audio_root, self.data[uid]['s1'][0])
             s2_path = os.path.join(self.audio_root, self.data[uid]['s2'][0])
 
-            mix_audio, _ = sf.read(mix_path)
-            s1_audio, _ = sf.read(s1_path)
-            s2_audio, _ = sf.read(s2_path)
+            if self.sp_factors != None:
+                factor = random.choice(self.sp_factors)
+            else:
+                factor = 1.0
+
+            mix_audio = self.load_audio(mix_path, factor)
+            s1_audio = self.load_audio(s1_path, factor)
+            s2_audio = self.load_audio(s2_path, factor)
 
             mix_audio = mix_audio.astype(np.float32)
             s1_audio = s1_audio.astype(np.float32)
