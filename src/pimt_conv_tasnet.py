@@ -18,7 +18,6 @@ class AddNoise(nn.Module):
         self.batchwise = config.get('batchwise', True)
 
     def forward(self, x):
-
         if not self.batchwise:
             if len(x.size()) == 3:
                 B, M, N = x.size()
@@ -34,9 +33,9 @@ class AddNoise(nn.Module):
             std = self.scale * std
             noise = torch.normal(mean = mean, std = std).to(DEV)
         else:
-            std = x.std()
+            std = x.std().item()
             std = self.scale * std
-            mean = x.mean()
+            mean = x.mean().item()
             noise = torch.normal(mean = mean, std = std, size = x.size()).to(DEV)
         return x + noise
 
@@ -53,7 +52,7 @@ class InputTransform(nn.Module):
                 if self.where == 'wav':
                     print('No specaugm on waveform')
                     exit()
-                self.trans.append(SpecAugm(config['specaugm']))
+                self.trans.append(SpecAugm(**config['specaugm']))
             if m == 'noise':
                 self.trans.append(AddNoise(config['noise']))
 

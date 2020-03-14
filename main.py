@@ -84,6 +84,8 @@ if __name__ == '__main__':
         from src.train_freeze import Trainer as Solver
     elif mode == 'perturb':
         from src.train_perturb import Trainer as Solver
+    elif mode == 'augm':
+        from src.train_augm import Trainer as Solver
     elif mode == 'phncls':
         from src.train_phncls import Trainer as Solver
     else:
