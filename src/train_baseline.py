@@ -67,9 +67,9 @@ class Trainer(Solver):
             dset = self.config['data']['dset']
         self.dset = dset
 
-        self.load_wsj0_data()
-        self.load_vctk_data()
-        self.load_libri_data()
+        self.load_dset('wsj0')
+        self.load_dset('vctk')
+        self.load_dset('libri')
 
         self.dsets = {
                 'wsj0': {
@@ -86,77 +86,40 @@ class Trainer(Solver):
                     },
                 }
 
-    def load_wsj0_data(self):
-
+    def load_dset(self, dset):
         seg_len = self.config['data']['segment']
-        audio_root = self.config['data']['wsj_root']
 
-        trainset = wsj0('./data/wsj0/id_list/tr.pkl',
+        # root: wsj0_root, vctk_root, libri_root
+        d = 'wsj' if dset == 'wsj0' else dset # stupid error
+        audio_root = self.config['data'][f'{d}_root']
+        tr_list = f'./data/{dset}/id_list/tr.pkl'
+        cv_list = f'./data/{dset}/id_list/cv.pkl'
+
+        sp_factors = self.config['solver'].get('sp_factors', None)
+        sp_factors = None if len(sp_factors) == 0 else sp_factors
+
+        trainset = wsj0(tr_list,
                 audio_root = audio_root,
                 seg_len = seg_len,
                 pre_load = False,
                 one_chunk_in_utt = True,
-                mode = 'tr')
-        self.wsj0_tr_loader = DataLoader(trainset,
+                mode = 'tr',
+                sp_factors = sp_factors)
+        tr_loader = DataLoader(trainset,
                 batch_size = self.batch_size,
                 shuffle = True,
                 num_workers = self.num_workers)
 
-        devset = wsj0_eval('./data/wsj0/id_list/cv.pkl',
+        devset = wsj0_eval(cv_list,
                 audio_root = audio_root,
                 pre_load = False)
-        self.wsj0_cv_loader = DataLoader(devset,
+        cv_loader = DataLoader(devset,
                 batch_size = self.batch_size,
                 shuffle = False,
                 num_workers = self.num_workers)
 
-    def load_vctk_data(self):
-
-        seg_len = self.config['data']['segment']
-        audio_root = self.config['data']['vctk_root']
-
-        trainset = wsj0('./data/vctk/id_list/tr.pkl',
-                audio_root = audio_root,
-                seg_len = seg_len,
-                pre_load = False,
-                one_chunk_in_utt = True,
-                mode = 'tr')
-        self.vctk_tr_loader = DataLoader(trainset,
-                batch_size = self.batch_size,
-                shuffle = True,
-                num_workers = self.num_workers)
-
-        devset = wsj0_eval('./data/vctk/id_list/cv.pkl',
-                audio_root = audio_root,
-                pre_load = False)
-        self.vctk_cv_loader = DataLoader(devset,
-                batch_size = self.batch_size,
-                shuffle = False,
-                num_workers = self.num_workers)
-
-    def load_libri_data(self):
-
-        seg_len = self.config['data']['segment']
-        audio_root = self.config['data']['libri_root']
-
-        trainset = wsj0('./data/libri/id_list/tr.pkl',
-                audio_root = audio_root,
-                seg_len = seg_len,
-                pre_load = False,
-                one_chunk_in_utt = True,
-                mode = 'tr')
-        self.libri_tr_loader = DataLoader(trainset,
-                batch_size = self.batch_size,
-                shuffle = True,
-                num_workers = self.num_workers)
-
-        devset = wsj0_eval('./data/libri/id_list/cv.pkl',
-                audio_root = audio_root,
-                pre_load = False)
-        self.libri_cv_loader = DataLoader(devset,
-                batch_size = self.batch_size,
-                shuffle = False,
-                num_workers = self.num_workers)
+        setattr(self, f'{dset}_tr_loader', tr_loader)
+        setattr(self, f'{dset}_cv_loader', cv_loader)
 
     def set_model(self):
         self.model = ConvTasNet(self.config['model']).to(DEV)
