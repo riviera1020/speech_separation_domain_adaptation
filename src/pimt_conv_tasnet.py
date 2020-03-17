@@ -94,6 +94,45 @@ class PiMtConvTasNet(ConvTasNet):
         self.separator = Separator(self.N, self.B, self.H, self.P, self.X, self.R, self.C,
                 self.norm_type, self.causal, self.mask_nonlinear)
 
+    def get_layer(self, loc):
+        """
+        loc:
+            a       -> idx = a in separator.network
+            a|b     -> idx = b in TemporalConvNet R
+            a|b|c   -> idx = c in TemporalConvNet X
+            a|b|c|d -> a, b, c as following and idx = c in TemporalBlock
+
+        Range of loc:
+            a: 0 to 3 (layer_norm, bottleneck_conv1x1, temporal_conv_net, mask_conv1x1)
+            b: 0 to R - 1 ( layers in TemporalConvNet R )
+            c: 0 to X - 1 ( layers in TemporalConvNet X )
+            d: 0 to 3 (conv1x1, prelu, norm, dsconv)
+
+            a = -1 equal to 'mask'
+            a|b == a|b|-1
+        """
+        ll = [ int(l) for l in loc.split('|') ]
+        assert len(ll) in [ 1, 2, 3 ]
+
+        if len(ll) == 1:
+            a = ll[0]
+            layer = self.separator.network[a]
+        if len(ll) == 2:
+            a, b = ll
+            layer = self.separator.network[a][2][b]
+        if len(ll) == 3:
+            a, b, c = ll
+            layer = self.separator.network[a][2][b][c]
+        if len(ll) == 4:
+            a, b, c, d = ll
+            layer = self.separator.network[a][2][b][c][d]
+        return layer
+
+    def clean_hook_tensor(self, feat):
+        locs = list(feat.keys())
+        for loc in locs:
+            del feat[loc]
+
     def forward(self, mixture):
         """
         Args:
@@ -131,6 +170,54 @@ class PiMtConvTasNet(ConvTasNet):
         est_source_noise = F.pad(est_source_noise, (0, T_origin - T_conv))
         return est_source_noise
 
+    def fetch_forward(self, mixture, locs, transform = None):
+        """
+        loc: a, a|b, a|b|c, mask
+        mask can fetch in forward, so no need to do register
+        """
+        store_mask = False
+        if 'mask' in locs:
+            store_mask = True
+
+        feat = {}
+        handles = []
+        def get_feat(loc):
+            def fetch(module, feat_in, feat_out):
+                feat[loc] = feat_out
+            return fetch
+        for loc in locs:
+            if loc != 'mask':
+                layer = self.get_layer(loc = loc)
+                h = layer.register_forward_hook(hook = get_feat(loc))
+                handles.append(h)
+                print(layer._forward_hooks)
+
+        if transform != None:
+            if transform.where == 'wav':
+                mixture = transform(mixture)
+                mixture_w_purb = self.encoder(mixture)
+                mixture_w = mixture_w_purb
+            elif transform.where == 'spec':
+                mixture_w = self.encoder(mixture)
+                mixture_w_purb = transform(mixture_w)
+            est_mask, score = self.separator(mixture_w_purb)
+        else:
+            mixture_w = self.encoder(mixture)
+            est_mask, score = self.separator(mixture_w)
+
+        if store_mask:
+            feat['mask'] = est_mask
+
+        est_source = self.decoder(mixture_w, est_mask)
+        T_origin = mixture.size(-1)
+        T_conv = est_source.size(-1)
+        est_source = F.pad(est_source, (0, T_origin - T_conv))
+
+        # remove hooks
+        for h in handles:
+            h.remove()
+        return est_source, feat
+
     def consistency_forward(self, mixture, transform):
         """
         Args:
@@ -162,3 +249,19 @@ class PiMtConvTasNet(ConvTasNet):
 
         return est_source_clean, est_source_noise, score_clean, score_noise
 
+class ConsistencyLoss(nn.Module):
+    def __init__(self, loss_type):
+        super(ConsistencyLoss, self).__init__()
+        self.loss_type = loss_type
+
+    def forward(self, wav_clean, wav_noise, mixture_lengths, feat_clean, feat_noise):
+        if self.loss_type == 'sisnr':
+            loss, max_snr, estimate_source, reorder_estimate_source = \
+                    cal_loss(wav_clean, wav_noise, mixture_lengths)
+        else:
+            loss = 0.
+            for loc in feat_clean:
+                c = feat_clean[loc]
+                n = feat_noise[loc]
+                loss += ((c - n) ** 2).mean()
+        return loss

@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 from src.solver import Solver
 from src.saver import Saver
 from src.utils import DEV, DEBUG, NCOL, inf_data_gen
-from src.pimt_conv_tasnet import PiMtConvTasNet, InputTransform
+from src.pimt_conv_tasnet import PiMtConvTasNet, InputTransform, ConsistencyLoss
 from src.pit_criterion import cal_loss, SISNR
 from src.dataset import wsj0, wsj0_eval
 from src.ranger import Ranger
@@ -87,11 +87,21 @@ class Trainer(Solver):
         elif self.pi_conf['use']:
             self.algo = 'pi'
             self.loss_type = self.pi_conf['loss_type']
+            self.warmup_epoch = self.pi_conf['warmup_epoch']
+            self.sup_init_w = self.pi_conf.get('sup_init_w', 0.)
+            self.uns_init_w = self.pi_conf.get('uns_init_w', 0.)
             self.sup_pi_lambda = self.pi_conf['sup_lambda']
             self.uns_pi_lambda = self.pi_conf['uns_lambda']
         elif self.mt_conf['use']:
             self.algo = 'mt'
             self.mt_lambda = self.mt_conf['lambda']
+
+        self.con_loss = ConsistencyLoss(self.loss_type)
+
+        self.locs = config['solver']['locs']
+        if len(self.locs) == 0:
+            print('Please Specify which location of feat to cal loss')
+            exit()
 
         input_transform = config['solver']['input_transform']
         self.set_transform(input_transform)
@@ -341,39 +351,39 @@ class Trainer(Solver):
             self.opt.zero_grad()
             loss.backward()
 
-            est_source_clean, est_source_noise, score_clean, score_noise = \
-                    self.model.consistency_forward(padded_mixture, self.transform)
+            # pi on sup
+            with torch.no_grad():
+                estimate_clean_sup, feat_clean_sup = self.model.fetch_forward(padded_mixture, self.locs)
+            estimate_noise_sup, feat_noise_sup = self.model.fetch_forward(padded_mixture, self.locs, self.transform)
+            loss_pi_sup = self.con_loss(estimate_clean_sup, estimate_noise_sup, mixture_lengths, feat_clean_sup, feat_noise_sup)
 
-            if self.loss_type == 'sisnr':
-                loss_pi_sup, max_snr, estimate_source, reorder_estimate_source = \
-                        cal_loss(est_source_clean, est_source_noise, mixture_lengths)
-            elif self.loss_type == 'mse':
-                loss_pi_sup = self.mse_loss(score_clean, score_noise)
-
-            # pi training
+            # pi on uns
             uns_sample = uns_gen.__next__()
             padded_mixture = uns_sample['mix'].to(DEV)
             mixture_lengths = uns_sample['ilens'].to(DEV)
 
-            est_source_clean, est_source_noise, score_clean, score_noise = \
-                    self.model.consistency_forward(padded_mixture, self.transform)
+            with torch.no_grad():
+                estimate_clean_uns, feat_clean_uns = self.model.fetch_forward(padded_mixture, self.locs)
+            estimate_noise_uns, feat_noise_uns = self.model.fetch_forward(padded_mixture, self.locs, self.transform)
+            loss_pi_uns = self.con_loss(estimate_clean_uns, estimate_noise_uns, mixture_lengths, feat_clean_uns, feat_noise_uns)
 
-            if self.loss_type == 'sisnr':
-                loss_pi_uns, max_snr, estimate_source, reorder_estimate_source = \
-                        cal_loss(est_source_clean, est_source_noise, mixture_lengths)
-            elif self.loss_type == 'mse':
-                loss_pi_uns = self.mse_loss(score_clean, score_noise)
-
-            #r = self.cal_consistency_weight(epoch, end_ep = self.epochs, end_w = self.pi_lambda)
-            loss = self.sup_pi_lambda * loss_pi_sup + self.uns_pi_lambda * loss_pi_uns
+            w_sup = self.cal_consistency_weight(epoch, end_ep = self.warmup_epoch, init_w = self.sup_init_w, end_w = self.sup_pi_lambda)
+            w_uns = self.cal_consistency_weight(epoch, end_ep = self.warmup_epoch, init_w = self.uns_init_w, end_w = self.uns_pi_lambda)
+            loss = w_sup * loss_pi_sup + w_uns * loss_pi_uns
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
             self.opt.step()
 
+            # forward_hook cause memory leak, need to release(del) them
+            for feat in [ feat_clean_sup, feat_noise_sup, feat_clean_uns, feat_noise_uns ]:
+                self.model.clean_hook_tensor(feat)
+
             meta = { 'iter_loss': sup_loss.item(),
                      'iter_pi_sup_loss': loss_pi_sup.item(),
-                     'iter_pi_uns_loss': loss_pi_uns.item() }
+                     'iter_pi_uns_loss': loss_pi_uns.item(),
+                     'w_sup': w_sup,
+                     'w_uns': w_uns }
             self.writer.log_step_info('train', meta)
 
             total_loss += sup_loss.item() * B
