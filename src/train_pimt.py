@@ -81,6 +81,7 @@ class Trainer(Solver):
 
         self.pi_conf = config['solver'].get('pi', {'use': False})
         self.mt_conf = config['solver'].get('mt', {'use': False})
+        self.mbt_conf = config['solver'].get('mbt', {'use': False})
         if self.pi_conf['use'] == self.mt_conf['use']:
             print('Specify to only use pi or mt algo')
             exit()
@@ -295,7 +296,6 @@ class Trainer(Solver):
             return None
 
     def update_ema(self, model, ema_model, alpha, global_step):
-
         # TODO, weird alpha
         alpha = min(1 - 1/(global_step + 1), alpha)
         for ema_param, param in zip(ema_model.parameters(), model.parameters()):
@@ -458,6 +458,63 @@ class Trainer(Solver):
         total_mixup = total_mixup / len(sup_loader)
         self.writer.add_scalar('train/epoch_loss', total_loss, epoch)
         self.writer.add_scalar('train/epoch_mixup_loss', total_mixup, epoch)
+
+    def train_mbt(self, epoch, sup_loader, uns_gen):
+        self.model.train()
+        total_loss = 0.
+        total_mixup = 0.
+
+        for i, sample in enumerate(tqdm(sup_loader, ncols = NCOL)):
+
+            padded_mixture = sample['mix'].to(DEV)
+            padded_source = sample['ref'].to(DEV)
+            mixture_lengths = sample['ilens'].to(DEV)
+
+            estimate_source = self.model(padded_mixture)
+
+            sup_loss, max_snr, estimate_source, reorder_estimate_source = \
+                cal_loss(padded_source, estimate_source, mixture_lengths)
+
+            # mixup training
+            uns_sample = uns_gen.__next__()
+            padded_mixture = uns_sample['mix'].to(DEV)
+            mixture_lengths = sample['ilens'].to(DEV)
+
+            with torch.no_grad():
+                teacher_out = self.ema_model(padded_mixture)
+                s1 = teacher_out[:, 0, :]
+                s2 = teacher_out[:, 1, :]
+
+                mlambda = self.beta_sampler.sample((s1.size(0),1)).to(DEV)
+                teacher_mix = mlambda * s1 + (1-mlambda) * s2
+
+            student_out = self.model(teacher_mix)
+            mixup_loss, max_snr, estimate_source, reorder_estimate_source = \
+                cal_loss(teacher_out, student_out, mixture_lengths)
+
+            r = np.exp(float(epoch+1)/self.epochs - 1)
+            loss = sup_loss + r * mixup_loss
+
+            # SGD update
+            self.opt.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+            self.opt.step()
+            self.writer.add_scalar('train/iter_loss', sup_loss.item(), self.step)
+
+            # EMA update
+            self.update_ema(self.model, self.ema_model, self.ema_alpha, self.step)
+
+            total_loss += sup_loss.item()
+            total_mixup += mixup_loss.item()
+
+            self.step += 1
+
+        total_loss = total_loss / len(sup_loader)
+        total_mixup = total_mixup / len(sup_loader)
+        self.writer.add_scalar('train/epoch_loss', total_loss, epoch)
+        self.writer.add_scalar('train/epoch_mixup_loss', total_mixup, epoch)
+
 
     def valid(self, loader, epoch, no_save = False, prefix = ""):
         self.model.eval()

@@ -8,6 +8,8 @@ from src.misc import apply_norm
 from src.utils import DEV
 from src.conv_tasnet import ConvTasNet, TemporalConvNet
 from src.specaugm import SpecAugm
+from src.pit_criterion import cal_loss
+from src.pimt_utils import PITMSELoss
 
 class AddNoise(nn.Module):
     def __init__(self, config):
@@ -102,6 +104,8 @@ class PiMtConvTasNet(ConvTasNet):
             a|b|c   -> idx = c in TemporalConvNet X
             a|b|c|d -> a, b, c as following and idx = c in TemporalBlock
 
+            a should always be 2 in a|*... setting
+
         Range of loc:
             a: 0 to 3 (layer_norm, bottleneck_conv1x1, temporal_conv_net, mask_conv1x1)
             b: 0 to R - 1 ( layers in TemporalConvNet R )
@@ -119,13 +123,13 @@ class PiMtConvTasNet(ConvTasNet):
             layer = self.separator.network[a]
         if len(ll) == 2:
             a, b = ll
-            layer = self.separator.network[a][2][b]
+            layer = self.separator.network[2][b]
         if len(ll) == 3:
             a, b, c = ll
-            layer = self.separator.network[a][2][b][c]
+            layer = self.separator.network[2][b][c]
         if len(ll) == 4:
             a, b, c, d = ll
-            layer = self.separator.network[a][2][b][c][d]
+            layer = self.separator.network[2][b][c][d]
         return layer
 
     def clean_hook_tensor(self, feat):
@@ -190,7 +194,6 @@ class PiMtConvTasNet(ConvTasNet):
                 layer = self.get_layer(loc = loc)
                 h = layer.register_forward_hook(hook = get_feat(loc))
                 handles.append(h)
-                print(layer._forward_hooks)
 
         if transform != None:
             if transform.where == 'wav':
