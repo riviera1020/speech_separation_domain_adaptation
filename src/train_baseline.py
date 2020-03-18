@@ -96,7 +96,6 @@ class Trainer(Solver):
         cv_list = f'./data/{dset}/id_list/cv.pkl'
 
         sp_factors = self.config['solver'].get('sp_factors', None)
-        sp_factors = None if len(sp_factors) == 0 else sp_factors
 
         trainset = wsj0(tr_list,
                 audio_root = audio_root,
