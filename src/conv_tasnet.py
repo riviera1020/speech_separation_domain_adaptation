@@ -43,10 +43,11 @@ class ConvTasNet(nn.Module):
         self.norm_type = config['norm_type']
         self.causal = config['causal']
         self.mask_nonlinear = config['mask_nonlinear']
+        self.dropout = config.get('dropout', 0.0)
         # Components
         self.encoder = Encoder(self.L, self.N)
         self.separator = TemporalConvNet(self.N, self.B, self.H, self.P, self.X, self.R, self.C,
-                self.norm_type, self.causal, self.mask_nonlinear)
+                self.norm_type, self.causal, self.mask_nonlinear, self.dropout)
         self.decoder = Decoder(self.N, self.L)
         # init
         for p in self.parameters():
@@ -121,7 +122,7 @@ class Decoder(nn.Module):
 
 class TemporalConvNet(nn.Module):
     def __init__(self, N, B, H, P, X, R, C, norm_type="gLN", causal=False,
-                 mask_nonlinear='relu'):
+                 mask_nonlinear='relu', dropout = 0.0):
         """
         Args:
             N: Number of filters in autoencoder
@@ -155,7 +156,8 @@ class TemporalConvNet(nn.Module):
                                          padding=padding,
                                          dilation=dilation,
                                          norm_type=norm_type,
-                                         causal=causal)]
+                                         causal=causal,
+                                         dropout=dropout)]
             repeats += [nn.Sequential(*blocks)]
         temporal_conv_net = nn.Sequential(*repeats)
         # [M, B, K] -> [M, C*N, K]
@@ -188,7 +190,7 @@ class TemporalConvNet(nn.Module):
 
 class TemporalBlock(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size,
-                 stride, padding, dilation, norm_type="gLN", causal=False):
+                 stride, padding, dilation, norm_type="gLN", causal=False, dropout=0.0):
         super(TemporalBlock, self).__init__()
         # [M, B, K] -> [M, H, K]
         conv1x1 = nn.Conv1d(in_channels, out_channels, 1, bias=False)
@@ -198,8 +200,9 @@ class TemporalBlock(nn.Module):
         dsconv = DepthwiseSeparableConv(out_channels, in_channels, kernel_size,
                                         stride, padding, dilation, norm_type,
                                         causal)
+        d = nn.Dropout(dropout)
         # Put together
-        self.net = nn.Sequential(conv1x1, prelu, norm, dsconv)
+        self.net = nn.Sequential(conv1x1, prelu, norm, dsconv, d)
 
     def forward(self, x):
         """
