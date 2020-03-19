@@ -65,9 +65,9 @@ class InputTransform(nn.Module):
 
 class Separator(TemporalConvNet):
     def __init__(self, N, B, H, P, X, R, C, norm_type="gLN", causal=False,
-                 mask_nonlinear='relu'):
+                 mask_nonlinear='relu', dropout = 0.0):
         super(Separator, self).__init__(N, B, H, P, X, R, C,
-                norm_type, causal, mask_nonlinear)
+                norm_type, causal, mask_nonlinear, dropout)
 
     def forward(self, mixture_w):
         """
@@ -94,7 +94,7 @@ class PiMtConvTasNet(ConvTasNet):
 
         del self.separator
         self.separator = Separator(self.N, self.B, self.H, self.P, self.X, self.R, self.C,
-                self.norm_type, self.causal, self.mask_nonlinear)
+                self.norm_type, self.causal, self.mask_nonlinear, self.dropout)
 
     def get_layer(self, loc):
         """
