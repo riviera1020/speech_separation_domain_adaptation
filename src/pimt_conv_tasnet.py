@@ -114,9 +114,11 @@ class PiMtConvTasNet(ConvTasNet):
 
             a = -1 equal to 'mask'
             a|b == a|b|-1
+
+        I am so idiot, it seems that loc would be 2 XD
         """
         ll = [ int(l) for l in loc.split('|') ]
-        assert len(ll) in [ 1, 2, 3 ]
+        assert len(ll) in [ 1, 2, 3, 4 ]
 
         if len(ll) == 1:
             a = ll[0]
@@ -180,8 +182,11 @@ class PiMtConvTasNet(ConvTasNet):
         mask can fetch in forward, so no need to do register
         """
         store_mask = False
+        store_score = False
         if 'mask' in locs:
             store_mask = True
+        if 'score' in locs:
+            store_score = True
 
         feat = {}
         handles = []
@@ -190,7 +195,7 @@ class PiMtConvTasNet(ConvTasNet):
                 feat[loc] = feat_out
             return fetch
         for loc in locs:
-            if loc != 'mask':
+            if loc not in [ 'mask', 'score']:
                 layer = self.get_layer(loc = loc)
                 h = layer.register_forward_hook(hook = get_feat(loc))
                 handles.append(h)
@@ -210,6 +215,8 @@ class PiMtConvTasNet(ConvTasNet):
 
         if store_mask:
             feat['mask'] = est_mask
+        if store_score:
+            feat['score'] = score
 
         est_source = self.decoder(mixture_w, est_mask)
         T_origin = mixture.size(-1)
@@ -219,38 +226,8 @@ class PiMtConvTasNet(ConvTasNet):
         # remove hooks
         for h in handles:
             h.remove()
+
         return est_source, feat
-
-    def consistency_forward(self, mixture, transform):
-        """
-        Args:
-            mixture: [M, T], M is batch size, T is #samples
-        Returns:
-            est_source: [M, C, T]
-        """
-        mixture_w = self.encoder(mixture)
-
-        if transform.where == 'wav':
-            mixture_purb = transform(mixture)
-            mixture_w_purb = self.encoder(mixture_purb)
-        elif transform.where == 'spec':
-            mixture_w_purb = mixture_w.clone().detach()
-            mixture_w_purb = transform(mixture_w_purb)
-
-        est_mask1, score_clean = self.separator(mixture_w)
-        est_mask2, score_noise = self.separator(mixture_w_purb)
-
-        est_source_clean = self.decoder(mixture_w, est_mask1)
-        T_origin = mixture.size(-1)
-        T_conv = est_source_clean.size(-1)
-        est_source_clean = F.pad(est_source_clean, (0, T_origin - T_conv))
-
-        est_source_noise = self.decoder(mixture_w, est_mask2)
-        T_origin = mixture.size(-1)
-        T_conv = est_source_noise.size(-1)
-        est_source_noise = F.pad(est_source_noise, (0, T_origin - T_conv))
-
-        return est_source_clean, est_source_noise, score_clean, score_noise
 
 class ConsistencyLoss(nn.Module):
     def __init__(self, loss_type):
@@ -266,5 +243,11 @@ class ConsistencyLoss(nn.Module):
             for loc in feat_clean:
                 c = feat_clean[loc]
                 n = feat_noise[loc]
-                loss += ((c - n) ** 2).mean()
+
+                if loc != 'mask' or loc != '3':
+                    c = feat_clean[loc]
+                    n = feat_noise[loc]
+                    loss += ((c - n) ** 2).mean()
+                else:
+                    loss += PITMSELoss(c, n)
         return loss
