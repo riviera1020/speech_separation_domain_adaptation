@@ -88,7 +88,7 @@ class Trainer(Solver):
         elif self.pi_conf['use']:
             self.algo = 'pi'
             self.loss_type = self.pi_conf['loss_type']
-            self.warmup_epoch = self.pi_conf['warmup_epoch']
+            self.warmup_step = self.pi_conf['warmup_step']
             self.sup_init_w = self.pi_conf.get('sup_init_w', 0.)
             self.uns_init_w = self.pi_conf.get('uns_init_w', 0.)
             self.sup_pi_lambda = self.pi_conf['sup_lambda']
@@ -318,6 +318,7 @@ class Trainer(Solver):
 
     def cal_consistency_weight(self, epoch, init_ep=0, end_ep=150, init_w=0.0, end_w=20.0):
         """Sets the weights for the consistency loss"""
+        # use step instead
         if epoch > end_ep:
             weight_cl = end_w
         elif epoch < init_ep:
@@ -367,8 +368,8 @@ class Trainer(Solver):
             estimate_noise_uns, feat_noise_uns = self.model.fetch_forward(padded_mixture, self.locs, self.transform)
             loss_pi_uns = self.con_loss(estimate_clean_uns, estimate_noise_uns, mixture_lengths, feat_clean_uns, feat_noise_uns)
 
-            w_sup = self.cal_consistency_weight(epoch, end_ep = self.warmup_epoch, init_w = self.sup_init_w, end_w = self.sup_pi_lambda)
-            w_uns = self.cal_consistency_weight(epoch, end_ep = self.warmup_epoch, init_w = self.uns_init_w, end_w = self.uns_pi_lambda)
+            w_sup = self.cal_consistency_weight(self.step, end_ep = self.warmup_step, init_w = self.sup_init_w, end_w = self.sup_pi_lambda)
+            w_uns = self.cal_consistency_weight(self.step, end_ep = self.warmup_step, init_w = self.uns_init_w, end_w = self.uns_pi_lambda)
             loss = w_sup * loss_pi_sup + w_uns * loss_pi_uns
 
             loss.backward()
