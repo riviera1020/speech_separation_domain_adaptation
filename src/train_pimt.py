@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from apex import amp
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
@@ -113,8 +114,17 @@ class Trainer(Solver):
         self.load_data()
         self.set_model()
 
+        self.fp16 = config['solver'].get('fp16', False)
+        self.convert_fp16()
+
     def set_transform(self, t_conf):
         self.transform = InputTransform(t_conf)
+
+    def convert_fp16(self):
+        if self.fp16:
+            print('Use mix-percision speed up')
+            opt_level = 'O1'
+            self.model, self.opt = amp.initialize(self.model, self.opt, opt_level=opt_level)
 
     def load_data(self):
 
@@ -234,6 +244,9 @@ class Trainer(Solver):
                 self.writer.set_epoch(self.start_epoch + 1)
                 self.writer.set_step(self.step + 1)
 
+                if self.fp16 and 'amp' in info_dict:
+                    amp.load_state_dict(info_dict['amp'])
+
         lr = self.config['optim']['lr']
         weight_decay = self.config['optim']['weight_decay']
 
@@ -336,6 +349,7 @@ class Trainer(Solver):
         cnt = 0
 
         for i, sample in enumerate(tqdm(sup_loader, ncols = NCOL)):
+            self.opt.zero_grad()
 
             # sup part
             padded_mixture = sample['mix'].to(DEV)
@@ -349,8 +363,11 @@ class Trainer(Solver):
                 cal_loss(padded_source, estimate_source, mixture_lengths)
             loss = sup_loss
 
-            self.opt.zero_grad()
-            loss.backward()
+            if self.fp16:
+                with amp.scale_loss(loss, self.opt) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
 
             # pi on sup
             with torch.no_grad():
@@ -372,7 +389,12 @@ class Trainer(Solver):
             w_uns = self.cal_consistency_weight(self.step, end_ep = self.warmup_step, init_w = self.uns_init_w, end_w = self.uns_pi_lambda)
             loss = w_sup * loss_pi_sup + w_uns * loss_pi_uns
 
-            loss.backward()
+            if self.fp16:
+                with amp.scale_loss(loss, self.opt) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
+
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
             self.opt.step()
 
@@ -564,6 +586,8 @@ class Trainer(Solver):
         model_name = f'{epoch}.pth'
         info_dict = { 'epoch': epoch, 'step': self.step, 'valid_score': valid_score, 'config': self.config }
         info_dict['optim'] = self.opt.state_dict()
+        if self.fp16:
+            info_dict['amp'] = amp.state_dict()
 
         self.saver.update(self.model, total_sisnri, model_name, info_dict)
 
