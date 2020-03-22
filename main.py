@@ -88,6 +88,8 @@ if __name__ == '__main__':
         from src.train_augm import Trainer as Solver
     elif mode == 'phncls':
         from src.train_phncls import Trainer as Solver
+    elif mode == 'mixemb':
+        from src.train_mixemb import Trainer as Solver
     else:
         print('Not imp')
         exit()
