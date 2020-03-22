@@ -95,6 +95,10 @@ class PiMtConvTasNet(ConvTasNet):
         del self.separator
         self.separator = Separator(self.N, self.B, self.H, self.P, self.X, self.R, self.C,
                 self.norm_type, self.causal, self.mask_nonlinear, self.dropout)
+        # init
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_normal_(p)
 
     def get_layer(self, loc):
         """
