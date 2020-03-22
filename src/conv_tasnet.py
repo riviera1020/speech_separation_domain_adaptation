@@ -202,7 +202,7 @@ class TemporalBlock(nn.Module):
                                         causal)
         d = nn.Dropout(dropout)
         # Put together
-        self.net = nn.Sequential(conv1x1, prelu, norm, dsconv, d)
+        self.net = nn.Sequential(d, conv1x1, prelu, norm, dsconv)
 
     def forward(self, x):
         """
