@@ -202,7 +202,7 @@ class TemporalBlock(nn.Module):
                                         causal)
         d = nn.Dropout(dropout)
         # Put together
-        self.net = nn.Sequential(d, conv1x1, prelu, norm, dsconv)
+        self.net = nn.Sequential(conv1x1, prelu, norm, d, dsconv)
 
     def forward(self, x):
         """
@@ -215,8 +215,6 @@ class TemporalBlock(nn.Module):
         out = self.net(x)
         # TODO: when P = 3 here works fine, but when P = 2 maybe need to pad?
         return out + residual  # look like w/o F.relu is better than w/ F.relu
-        # return F.relu(out + residual)
-
 
 class DepthwiseSeparableConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size,
