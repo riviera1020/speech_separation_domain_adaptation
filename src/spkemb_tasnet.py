@@ -163,6 +163,7 @@ class DepthwiseSeparableConv(nn.Module):
         # Use `groups` option to implement depthwise convolution
         # [M, H, K] -> [M, H, K]
         self.emb_dim = 256
+        in_channels = in_channels + self.emb_dim
         depthwise_conv = nn.Conv1d(in_channels, in_channels, kernel_size,
                                    stride=stride, padding=padding,
                                    dilation=dilation, groups=in_channels,
@@ -173,7 +174,7 @@ class DepthwiseSeparableConv(nn.Module):
         norm = chose_norm(norm_type, in_channels)
         # [M, H, K] -> [M, B, K]
 
-        pointwise_conv = nn.Conv1d(in_channels + self.emb_dim, out_channels, 1, bias=False)
+        pointwise_conv = nn.Conv1d(in_channels, out_channels, 1, bias=False)
         # Put together
         if causal:
             self.net = nn.Sequential(depthwise_conv, chomp, prelu, norm)
@@ -188,11 +189,11 @@ class DepthwiseSeparableConv(nn.Module):
         Returns:
             result: [M, B, K]
         """
-        x = self.net(x)
         T = x.size(-1)
         dvecs = dvecs.unsqueeze(-1).expand(-1, -1, T)
         cat_in = torch.cat([x, dvecs], dim = 1)
-        x = self.pointwise_conv(cat_in)
+        x = self.net(cat_in)
+        x = self.pointwise_conv(x)
         return x
 
 if __name__ == "__main__":
