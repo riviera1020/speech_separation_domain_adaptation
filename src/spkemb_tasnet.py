@@ -7,7 +7,8 @@ import torch.nn.functional as F
 
 from src.sep_utils import overlap_and_add
 from src.conv_tasnet import EPS, Encoder, Decoder, ConvTasNet
-from src.conv_tasnet import chose_norm, ChannelwiseLayerNorm, DepthwiseSeparableConv
+from src.conv_tasnet import chose_norm, ChannelwiseLayerNorm
+#from src.conv_tasnet import DepthwiseSeparableConv
 
 class SpkEmbTasNet(ConvTasNet):
     def __init__(self, config):
@@ -130,16 +131,18 @@ class TemporalBlock(nn.Module):
         # TODO, condition on conv1x1 now, try dsconv maybe
         # [M, B, K] -> [M, H, K]
         self.emb_dim = 256
-        conv1x1 = nn.Conv1d(in_channels + self.emb_dim, out_channels, 1, bias=False)
+        conv1x1 = nn.Conv1d(in_channels, out_channels, 1, bias=False)
         prelu = nn.PReLU()
         norm = chose_norm(norm_type, out_channels)
         # [M, H, K] -> [M, B, K]
         dsconv = DepthwiseSeparableConv(out_channels, in_channels, kernel_size,
                                         stride, padding, dilation, norm_type,
                                         causal)
-        d = nn.Dropout(dropout)
+        # TODO, disable dropout now
+        #d = nn.Dropout(dropout)
         # Put together
-        self.net = nn.Sequential(conv1x1, prelu, norm, dsconv, d)
+        self.net = nn.Sequential(conv1x1, prelu, norm)
+        self.dsconv = dsconv
 
     def forward(self, x, dvecs):
         """
@@ -149,19 +152,17 @@ class TemporalBlock(nn.Module):
             [M, B, K]
         """
         residual = x
-        T = x.size(-1)
-        dvecs = dvecs.unsqueeze(-1).expand(-1, -1, T)
-        cat_in = torch.cat([x, dvecs], dim = 1)
-        out = self.net(cat_in)
+        x = self.net(x)
+        out = self.dsconv(x, dvecs)
         return out + residual
 
-'''
 class DepthwiseSeparableConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size,
                  stride, padding, dilation, norm_type="gLN", causal=False):
         super(DepthwiseSeparableConv, self).__init__()
         # Use `groups` option to implement depthwise convolution
         # [M, H, K] -> [M, H, K]
+        self.emb_dim = 256
         depthwise_conv = nn.Conv1d(in_channels, in_channels, kernel_size,
                                    stride=stride, padding=padding,
                                    dilation=dilation, groups=in_channels,
@@ -171,24 +172,28 @@ class DepthwiseSeparableConv(nn.Module):
         prelu = nn.PReLU()
         norm = chose_norm(norm_type, in_channels)
         # [M, H, K] -> [M, B, K]
-        pointwise_conv = nn.Conv1d(in_channels, out_channels, 1, bias=False)
+
+        pointwise_conv = nn.Conv1d(in_channels + self.emb_dim, out_channels, 1, bias=False)
         # Put together
         if causal:
-            self.net = nn.Sequential(depthwise_conv, chomp, prelu, norm,
-                                     pointwise_conv)
+            self.net = nn.Sequential(depthwise_conv, chomp, prelu, norm)
         else:
-            self.net = nn.Sequential(depthwise_conv, prelu, norm,
-                                     pointwise_conv)
+            self.net = nn.Sequential(depthwise_conv, prelu, norm)
+        self.pointwise_conv = pointwise_conv
 
-    def forward(self, x):
+    def forward(self, x, dvecs):
         """
         Args:
             x: [M, H, K]
         Returns:
             result: [M, B, K]
         """
-        return self.net(x)
-'''
+        x = self.net(x)
+        T = x.size(-1)
+        dvecs = dvecs.unsqueeze(-1).expand(-1, -1, T)
+        cat_in = torch.cat([x, dvecs], dim = 1)
+        x = self.pointwise_conv(cat_in)
+        return x
 
 if __name__ == "__main__":
     torch.manual_seed(123)
