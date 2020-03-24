@@ -200,9 +200,12 @@ class TemporalBlock(nn.Module):
         dsconv = DepthwiseSeparableConv(out_channels, in_channels, kernel_size,
                                         stride, padding, dilation, norm_type,
                                         causal)
-        d = nn.Dropout(dropout)
-        # Put together
-        self.net = nn.Sequential(conv1x1, prelu, norm, d, dsconv)
+
+        if dropout > 0.0:
+            d = nn.Dropout(dropout)
+            self.net = nn.Sequential(conv1x1, prelu, norm, d, dsconv)
+        else:
+            self.net = nn.Sequential(conv1x1, prelu, norm, dsconv)
 
     def forward(self, x):
         """
