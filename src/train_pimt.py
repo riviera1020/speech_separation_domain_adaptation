@@ -316,10 +316,10 @@ class Trainer(Solver):
 
     def exec(self):
         for epoch in tqdm(range(self.start_epoch, self.epochs), ncols = NCOL):
-            #if self.algo == 'pi':
-            #    self.train_pi_model(epoch, self.sup_tr_loader, self.uns_tr_gen)
-            #elif self.algo == 'mt':
-            #    self.train_mt(epoch, self.sup_tr_loader, self.uns_tr_gne)
+            if self.algo == 'pi':
+                self.train_pi_model(epoch, self.sup_tr_loader, self.uns_tr_gen)
+            elif self.algo == 'mt':
+                self.train_mt(epoch, self.sup_tr_loader, self.uns_tr_gne)
 
             # Valid training dataset
             self.valid(self.sup_cv_loader, epoch, prefix = self.sup_dset)
