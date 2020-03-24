@@ -19,16 +19,15 @@ from src.utils import DEV, DEBUG, NCOL, inf_data_gen
 from src.conv_tasnet import ConvTasNet
 from src.da_conv_tasnet import DAConvTasNet
 from src.domain_cls import DomainClassifier
-from src.pit_criterion import cal_loss, cal_norm
-from src.dataset import wsj0
-from src.vctk import VCTK
+from src.pit_criterion import cal_loss, SISNR
+from src.dataset import wsj0, wsj0_eval
 from src.scheduler import RampScheduler, ConstantScheduler, DANNScheduler
 from src.gradient_penalty import calc_gradient_penalty
+from src.dashboard import Dashboard
+from src.ranger import Ranger
 
 class Trainer(Solver):
-
-    def __init__(self, config, stream = None):
-        #def __init__(self, data, model, optimizer, args):
+    def __init__(self, config):
         super(Trainer, self).__init__(config)
 
         self.exp_name = config['solver']['exp_name']
@@ -36,29 +35,48 @@ class Trainer(Solver):
         ts = time.time()
         st = datetime.datetime.fromtimestamp(ts).strftime('%Y_%m_%d_%H_%M_%S')
 
-        save_name = self.exp_name + '-' + st
-        self.save_dir = os.path.join(config['solver']['save_dir'], save_name)
-        self.safe_mkdir(self.save_dir)
-        self.saver = Saver(config['solver']['max_save_num'], self.save_dir, 'min')
-        yaml.dump(config, open(os.path.join(self.save_dir, 'config.yaml'), 'w'),
-                default_flow_style = False ,indent = 4)
+        self.resume_model = False
+        resume_exp_name = config['solver'].get('resume_exp_name', '')
+        if resume_exp_name:
+            self.resume_model = True
+            exp_name = resume_exp_name
+            self.save_dir = os.path.join(self.config['solver']['save_dir'], exp_name)
+            self.log_dir = os.path.join(self.config['solver']['log_dir'], exp_name)
 
-        log_name = self.exp_name + '-' + st
-        self.log_dir = os.path.join(config['solver']['log_dir'], log_name)
-        self.safe_mkdir(self.log_dir)
-        self.writer = SummaryWriter(self.log_dir)
+            if not os.path.isdir(self.save_dir) or not os.path.isdir(self.log_dir):
+                print('Resume Exp name Error')
+                exit()
 
-        if stream != None:
-            self.writer.add_text('Config', stream)
+            self.saver = Saver(
+                    self.config['solver']['max_save_num'],
+                    self.save_dir,
+                    'max',
+                    resume = True,
+                    resume_score_fn = lambda x: x['valid_score']['valid_sisnri'])
 
-        self.total_steps = config['solver']['total_steps']
-        self.start_step = config['solver']['start_step']
+            self.writer = Dashboard(exp_name, self.config, self.log_dir, resume=True)
+
+        else:
+            save_name = self.exp_name + '-' + st
+            self.save_dir = os.path.join(config['solver']['save_dir'], save_name)
+            self.safe_mkdir(self.save_dir)
+            self.saver = Saver(config['solver']['max_save_num'], self.save_dir, 'max')
+            yaml.dump(config, open(os.path.join(self.save_dir, 'config.yaml'), 'w'),
+                    default_flow_style = False ,indent = 4)
+
+            log_name = self.exp_name + '-' + st
+            self.log_dir = os.path.join(config['solver']['log_dir'], log_name)
+            self.safe_mkdir(self.log_dir)
+            self.writer = Dashboard(log_name, config, self.log_dir)
+
+        # TODO, change to epoch-based
+        self.epochs = config['solver']['epochs']
+        self.start_epoch = config['solver']['start_epoch']
         self.batch_size = config['solver']['batch_size']
         self.D_grad_clip = config['solver']['D_grad_clip']
         self.G_grad_clip = config['solver']['G_grad_clip']
         self.num_workers = config['solver']['num_workers']
-        self.valid_step = config['solver']['valid_step']
-        self.valid_time = 0
+        self.step = 0
         self.pretrain_d_step = config['solver'].get('pretrain_d_step', 0)
 
         self.g_iters = config['solver']['g_iters']
@@ -71,66 +89,66 @@ class Trainer(Solver):
         self.set_model()
 
     def load_data(self):
-        self.load_wsj0_data()
-        self.load_vctk_data()
+        # Set training dataset
+        dset = 'wsj0'
+        if 'dset' in self.config['data']:
+            dset = self.config['data']['dset']
+        self.dset = dset
+        self.uns_dset = self.config['solver'].get('uns_dset', 'vctk')
 
-    def load_wsj0_data(self):
+        # Load loader for sup training
+        seg_len = self.config['data']['segment']
+        self.sup_loader = self.load_tr_dset(self.dset, seg_len)
 
-        seg_len = self.config['data']['wsj0']['segment']
-        audio_root = self.config['data']['wsj_root']
+        # Load data gen for gan training
+        uns_len = self.config['data'].get('uns_segment', 2.0)
+        self.sup_gen = inf_data_gen(self.load_tr_dset(self.dset, uns_len))
+        self.uns_gen = inf_data_gen(self.load_tr_dset(self.uns_dset, uns_len))
 
-        trainset = wsj0('./data/wsj0/id_list/tr.pkl',
+        # Load cv loader
+        self.dsets = {
+                'wsj0': {
+                    'cv': self.load_cv_dset('wsj0'),
+                    },
+                'vctk': {
+                    'cv': self.load_cv_dset('vctk'),
+                    },
+                'libri': {
+                    'cv': self.load_cv_dset('libri'),
+                    },
+                }
+
+    def load_tr_dset(self, dset, seg_len):
+        # root: wsj0_root, vctk_root, libri_root
+        d = 'wsj' if dset == 'wsj0' else dset # stupid error
+        audio_root = self.config['data'][f'{d}_root']
+        tr_list = f'./data/{dset}/id_list/tr.pkl'
+        trainset = wsj0(tr_list,
                 audio_root = audio_root,
                 seg_len = seg_len,
                 pre_load = False,
                 one_chunk_in_utt = True,
-                mode = 'tr')
-        self.wsj0_tr_loader = DataLoader(trainset,
+                mode = 'tr',
+                sp_factors = None)
+        tr_loader = DataLoader(trainset,
                 batch_size = self.batch_size,
                 shuffle = True,
-                num_workers = self.num_workers,
-                drop_last = True)
-        self.wsj0_gen = inf_data_gen(self.wsj0_tr_loader)
+                num_workers = self.num_workers)
+        return tr_loader
 
-        devset = wsj0('./data/wsj0/id_list/cv.pkl',
+    def load_cv_dset(self, dset):
+        # root: wsj0_root, vctk_root, libri_root
+        d = 'wsj' if dset == 'wsj0' else dset # stupid error
+        audio_root = self.config['data'][f'{d}_root']
+        cv_list = f'./data/{dset}/id_list/cv.pkl'
+        devset = wsj0_eval(cv_list,
                 audio_root = audio_root,
-                seg_len = seg_len,
-                pre_load = False,
-                one_chunk_in_utt = False,
-                mode = 'cv')
-        self.wsj0_cv_loader = DataLoader(devset,
+                pre_load = False)
+        cv_loader = DataLoader(devset,
                 batch_size = self.batch_size,
                 shuffle = False,
                 num_workers = self.num_workers)
-
-    def load_vctk_data(self):
-
-        seg_len = self.config['data']['vctk']['segment']
-        audio_root = self.config['data']['vctk_root']
-
-        trainset = VCTK('./data/vctk/id_list/tr.pkl',
-                audio_root = audio_root,
-                seg_len = seg_len,
-                pre_load = False,
-                one_chunk_in_utt = True,
-                mode = 'tr')
-        self.vctk_tr_loader = DataLoader(trainset,
-                batch_size = self.batch_size,
-                shuffle = True,
-                num_workers = self.num_workers,
-                drop_last = True)
-        self.vctk_gen = inf_data_gen(self.vctk_tr_loader)
-
-        devset = VCTK('./data/vctk/id_list/cv.pkl',
-                audio_root = audio_root,
-                seg_len = seg_len,
-                pre_load = False,
-                one_chunk_in_utt = False,
-                mode = 'cv')
-        self.vctk_cv_loader = DataLoader(devset,
-                batch_size = self.batch_size,
-                shuffle = False,
-                num_workers = self.num_workers)
+        return cv_loader
 
     def set_optim(self, models, opt_config):
 
@@ -173,7 +191,6 @@ class Trainer(Solver):
         elif sch_config['function'] == 'constant':
             return ConstantScheduler(sch_config['value'])
 
-
     def set_model(self):
 
         self.G = DAConvTasNet(self.config['model']['gen']).to(DEV)
@@ -198,8 +215,8 @@ class Trainer(Solver):
                 print(f"Steps : {info_dict['step']}")
             print(info_dict['valid_score'])
 
-        model_path = self.config['solver']['resume']
-        if model_path != '':
+        if self.resume_model:
+            model_path = os.path.join(self.save_dir, 'latest.pth')
             print('Resuming Training')
             print(f'Loading Model: {model_path}')
 
@@ -221,6 +238,10 @@ class Trainer(Solver):
                 optim_dict = info_dict['d_optim']
                 self.d_optim.load_state_dict(optim_dict)
 
+            # dashboard is one-base
+            self.writer.set_epoch(self.start_epoch + 1)
+            self.writer.set_step(self.step + 1)
+
         self.Lg_scheduler = self.set_scheduler(self.config['solver']['Lg_scheduler'])
         self.Ld_scheduler = self.set_scheduler(self.config['solver']['Ld_scheduler'])
 
@@ -238,75 +259,95 @@ class Trainer(Solver):
                         patience = patience,
                         verbose = True)
 
-    def log_meta(self, meta, dset):
-        for key in meta:
-            value = meta[key]
-            name = f'{dset}_{key}'
-            self.writer.add_scalar(f'valid/{name}', value, self.valid_time)
-
     def exec(self):
-
         self.G.train()
         for step in tqdm(range(0, self.pretrain_d_step), ncols = NCOL):
-            self.train_dis_once(step, self.wsj0_gen, self.vctk_gen, pretrain = True)
+            self.train_dis_once(step, self.sup_gen, self.uns_gen, pretrain = True)
+            self.writer.step()
+        self.writer.set_step(1)
 
-        for step in tqdm(range(self.start_step, self.total_steps), ncols = NCOL):
+        for epoch in tqdm(range(self.start_epoch, self.epochs), ncols = NCOL):
 
             # supervised
-            self.train_sup_once(step, self.wsj0_gen)
+            self.train_one_epoch(epoch, self.sup_loader)
+
+            valid_score = {}
+            # Valid sup training dataset
+            sup_score = self.valid(self.dsets[self.dset]['cv'], epoch, prefix = self.dset, label = self.src_label)
+            valid_score[self.dset] = sup_score
+
+            # Valid uns training dataset
+            uns_score = self.valid(self.dsets[self.uns_dset]['cv'], epoch, no_save = True, prefix = self.uns_dset, label = self.tgt_label)
+            valid_score[self.uns_dset] = uns_score
+
+            # Valid not training dataset
+            for dset in self.dsets:
+                if dset != self.dset and dset != self.uns_dset:
+                    s = self.valid(self.dsets[dset]['cv'], epoch, no_save = True, prefix = dset)
+                    valid_score[dset] = s
+
+            if self.use_scheduler:
+                if self.scheduler_type == 'ReduceLROnPlateau':
+                    self.lr_scheduler.step(sup_score['valid_loss'])
+
+            model_name = f'{epoch}.pth'
+            info_dict = { 'epoch': epoch, 'step': self.step, 'valid_score': valid_score, 'config': self.config }
+            info_dict['g_optim'] = self.g_optim.state_dict()
+            info_dict['d_optim'] = self.d_optim.state_dict()
+            info_dict['D_state_dict'] = self.D.state_dict()
+
+            save_crit = sup_score['valid_sisnri']
+            self.saver.update(self.G, save_crit, model_name, info_dict)
+
+            model_name = 'latest.pth'
+            self.saver.force_save(self.G, model_name, info_dict)
+            self.writer.epoch()
+
+    def train_one_epoch(self, epoch, tr_loader):
+        self.G.train()
+        total_loss = 0.
+        total_sisnri = 0.
+        cnt = 0
+
+        for i, sample in enumerate(tqdm(tr_loader, ncols = NCOL)):
+
+            padded_mixture = sample['mix'].to(DEV)
+            padded_source = sample['ref'].to(DEV)
+            mixture_lengths = sample['ilens'].to(DEV)
+
+            estimate_source, _ = self.G(padded_mixture)
+
+            loss, max_snr, estimate_source, reorder_estimate_source = \
+                cal_loss(padded_source, estimate_source, mixture_lengths)
+
+            self.g_optim.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.G.parameters(), self.G_grad_clip)
+            self.g_optim.step()
+
+            B = padded_source.size(0)
+            total_loss += loss.item() * B
+            cnt += B
+            with torch.no_grad():
+                mix_sisnr = SISNR(padded_source, padded_mixture, mixture_lengths)
+                total_sisnri += (max_snr - mix_sisnr).sum()
+
+            meta = { 'iter_loss': loss.item() }
+            self.writer.log_step_info('train', meta)
 
             # semi part
-            self.train_dis_once(step, self.wsj0_gen, self.vctk_gen)
-            self.train_gen_once(step, self.wsj0_gen, self.vctk_gen)
+            self.train_dis_once(self.step, self.sup_gen, self.uns_gen)
+            self.train_gen_once(self.step, self.sup_gen, self.uns_gen)
 
-            if step % self.valid_step == 0 and step != 0:
-                self.G.eval()
-                wsj0_meta = self.valid(self.wsj0_cv_loader, self.src_label)
-                vctk_meta = self.valid(self.vctk_cv_loader, self.tgt_label)
-                self.G.train()
+            self.step += 1
+            self.writer.step()
 
-                if self.use_scheduler:
-                    if self.scheduler_type == 'ReduceLROnPlateau':
-                        self.lr_scheduler.step(wsj0_meta['valid_loss'])
+        total_loss = total_loss / cnt
+        total_sisnri = total_sisnri / cnt
 
-                # Do saving
-                self.log_meta(wsj0_meta, 'wsj0')
-                self.log_meta(vctk_meta, 'vctk')
-
-                model_name = f'{step}.pth'
-                valid_score = { 'wsj0': wsj0_meta, 'vctk': vctk_meta }
-                info_dict = { 'step': step, 'valid_score': valid_score }
-                info_dict['g_optim'] = self.g_optim.state_dict()
-                info_dict['d_optim'] = self.d_optim.state_dict()
-                info_dict['D_state_dict'] = self.D.state_dict()
-
-                # TODO, use vctk_loss as save crit
-                save_crit = vctk_meta['valid_loss']
-                self.saver.update(self.G, save_crit, model_name, info_dict)
-
-                model_name = 'latest.pth'
-                self.saver.force_save(self.G, model_name, info_dict)
-
-                self.valid_time += 1
-
-
-    def train_sup_once(self, step, data_gen):
-
-        sample = data_gen.__next__()
-
-        padded_mixture = sample['mix'].to(DEV)
-        padded_source = sample['ref'].to(DEV)
-        mixture_lengths = sample['ilens'].to(DEV)
-
-        estimate_source, _ = self.G(padded_mixture)
-
-        loss, max_snr, estimate_source, reorder_estimate_source = \
-            cal_loss(padded_source, estimate_source, mixture_lengths)
-
-        self.g_optim.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.G.parameters(), self.G_grad_clip)
-        self.g_optim.step()
+        meta = { 'epoch_loss': total_loss,
+                 'epoch_sisnri': total_sisnri }
+        self.writer.log_epoch_info('train', meta)
 
     def train_dis_once(self, step, src_gen, tgt_gen, pretrain = False):
         # assert batch_size is even
@@ -319,8 +360,10 @@ class Trainer(Solver):
         total_d_loss = 0.
         weighted_d_loss = 0.
         total_gp = 0.
-        domain_acc = 0.
-        cnt = 0
+        src_domain_acc = 0.
+        tgt_domain_acc = 0.
+        src_cnt = 0
+        tgt_cnt = 0
         for _ in range(self.d_iters):
 
             # fake(src) sample
@@ -338,9 +381,8 @@ class Trainer(Solver):
                                             self.src_label.expand_as(d_fake_out))
                 with torch.no_grad():
                     src_dp = ((F.sigmoid(d_fake_out) >= 0.5).float() == self.src_label).float()
-                    domain_acc += src_dp.sum().item()
-                    cnt += src_dp.numel()
-                    self.writer.add_scalar(f'train/{prefix}dis_src_domain_acc', src_dp.mean().item(), step)
+                    src_domain_acc += src_dp.sum().item()
+                    src_cnt += src_dp.numel()
 
             # true(tgt) sample
             sample = tgt_gen.__next__()
@@ -357,9 +399,8 @@ class Trainer(Solver):
                                             self.tgt_label.expand_as(d_real_out))
                 with torch.no_grad():
                     tgt_dp = ((F.sigmoid(d_real_out) >= 0.5).float() == self.tgt_label).float()
-                    domain_acc += tgt_dp.sum().item()
-                    cnt += tgt_dp.numel()
-                    self.writer.add_scalar(f'train/{prefix}dis_tgt_domain_acc', tgt_dp.mean().item(), step)
+                    tgt_domain_acc += tgt_dp.sum().item()
+                    tgt_cnt += tgt_dp.numel()
 
             d_loss = d_real_loss + d_fake_loss
 
@@ -389,13 +430,16 @@ class Trainer(Solver):
         total_d_loss /= self.d_iters
         weighted_d_loss /= self.d_iters
         total_gp /= self.d_iters
+        domain_acc = (src_domain_acc + tgt_domain_acc) / (src_cnt + tgt_cnt)
+        src_domain_acc /= src_cnt
+        tgt_domain_acc /= tgt_cnt
 
-        self.writer.add_scalar(f'train/{prefix}d_loss', total_d_loss, step)
-        if self.adv_loss == 'wgan-gp':
-            self.writer.add_scalar(f'train/{prefix}gradient_penalty', total_gp, step)
-        elif self.adv_loss == 'gan':
-            domain_acc = domain_acc / cnt
-            self.writer.add_scalar(f'train/{prefix}dis_domain_acc', domain_acc, step)
+        meta = { f'{prefix}dis_src_domain_acc': src_domain_acc,
+                 f'{prefix}dis_tgt_domain_acc': tgt_domain_acc,
+                 f'{prefix}d_loss': total_d_loss,
+                 f'{prefix}gradient_penalty': total_gp,
+                 f'{prefix}dis_domain_acc': domain_acc }
+        self.writer.log_step_info('train', meta)
 
     def train_gen_once(self, step, src_gen, tgt_gen):
         # Only remain gan now
@@ -457,17 +501,20 @@ class Trainer(Solver):
 
         total_g_loss /= self.g_iters
         weighted_g_loss /= self.g_iters
-        self.writer.add_scalar('train/g_loss', total_g_loss, step)
-        self.writer.add_scalar('train/weighted_g_loss', weighted_g_loss, step)
+        meta = { 'g_loss': total_g_loss,
+                 'weighted_g_loss': weighted_g_loss }
         if self.adv_loss == 'gan':
             domain_acc = domain_acc / cnt
-            self.writer.add_scalar('train/gen_domain_acc', domain_acc, step)
+            meta['gen_domain_acc'] = domain_acc
+        self.writer.log_step_info('train', meta)
 
-    def valid(self, loader, label):
+    def valid(self, loader, epoch, no_save = False, prefix = "", label = None):
+        self.G.eval()
         total_loss = 0.
-        total_snr = 0.
+        total_sisnri = 0.
         domain_acc = 0.
         cnt = 0
+        dcnt = 0
 
         with torch.no_grad():
             for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
@@ -476,28 +523,41 @@ class Trainer(Solver):
                 padded_source = sample['ref'].to(DEV)
                 mixture_lengths = sample['ilens'].to(DEV)
 
+                ml = mixture_lengths.max().item()
+                padded_mixture = padded_mixture[:, :ml]
+                padded_source = padded_source[:, :, :ml]
+                B = padded_source.size(0)
+
                 estimate_source, feature = self.G(padded_mixture)
 
                 loss, max_snr, estimate_source, reorder_estimate_source = \
                     cal_loss(padded_source, estimate_source, mixture_lengths)
 
-                if self.adv_loss != 'wgan-gp':
-                    dp = (F.sigmoid(self.D(feature)) >= 0.5).float()
-                    cnt += dp.numel()
+                mix_sisnr = SISNR(padded_source, padded_mixture, mixture_lengths)
+                max_sisnri = (max_snr - mix_sisnr)
 
+                if self.adv_loss != 'wgan-gp' and label != None:
+                    dp = (F.sigmoid(self.D(feature)) >= 0.5).float()
+                    dcnt += dp.numel()
                     acc_num = (dp == label).sum().item()
                     domain_acc += float(acc_num)
 
-                total_loss += loss.item()
-                total_snr += max_snr.mean().item()
+                total_loss += loss.item() * B
+                total_sisnri += max_sisnri.sum().item()
+                cnt += B
 
-        total_loss = total_loss / len(loader)
-        total_snr = total_snr / len(loader)
-        domain_acc = domain_acc / cnt
+        total_sisnri = total_sisnri / cnt
+        total_loss = total_loss / cnt
+        if self.adv_loss != 'wgan-gp' and label != None:
+            domain_acc = domain_acc / dcnt
 
-        meta = {}
-        meta['valid_loss'] = total_loss
-        meta['valid_snr'] = total_snr
-        meta['valid_domain_acc'] = domain_acc
+        meta = { f'{prefix}_epoch_loss': total_loss,
+                 f'{prefix}_epoch_sisnri': total_sisnri,
+                 f'{prefix}_epoch_domain_acc': domain_acc }
+        self.writer.log_epoch_info('valid', meta)
 
-        return meta
+        valid_score = {}
+        valid_score['valid_loss'] = total_loss
+        valid_score['valid_sisnri'] = total_sisnri
+        valid_score['valid_domain_acc'] = domain_acc
+        return valid_score
