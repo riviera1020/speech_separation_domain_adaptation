@@ -13,10 +13,11 @@ from src.solver import Solver
 from src.saver import Saver
 from src.utils import DEV, DEBUG, NCOL
 from src.conv_tasnet import ConvTasNet
+from src.dprnn import DualRNN
+from src.adanet import ADANet
 from src.pit_criterion import cal_loss, SISNR
 from src.dataset import wsj0, wsj0_eval
 from src.ranger import Ranger
-from src.dprnn import DualRNN
 from src.evaluation import cal_SDR, cal_SISNRi, cal_SISNR
 from src.sep_utils import remove_pad, load_mix_sdr
 from src.dashboard import Dashboard
@@ -121,8 +122,12 @@ class Trainer(Solver):
         setattr(self, f'{dset}_cv_loader', cv_loader)
 
     def set_model(self):
-        self.model = ConvTasNet(self.config['model']).to(DEV)
-        #self.model = DualRNN(self.config['model']).to(DEV)
+
+        self.model_type = self.config['model'].get('type', 'convtasnet')
+        if self.model_type == 'adanet':
+            self.model = ADANet(self.config['model']).to(DEV)
+        else:
+            self.model = ConvTasNet(self.config['model']).to(DEV)
 
         # pretrained conf is only for debugging
         pretrained = self.config['solver'].get('pretrained', '')
