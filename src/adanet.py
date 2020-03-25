@@ -212,7 +212,7 @@ class AttractorConvNet(nn.Module):
         s_subset_choice = s_subset_choice.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, self.C, self.emb_size)
 
         # [ M, C, E ]
-        s_attractors = torch.gather(s_attractor_sets, dim = 1, index = s_subset_choice).squeeze()
+        s_attractors = torch.gather(s_attractor_sets, dim = 1, index = s_subset_choice).squeeze(dim = 1)
 
         # [ M, C, N, K ]
         s_logits = torch.einsum('menk,mce->mcnk', embedding, s_attractors)
