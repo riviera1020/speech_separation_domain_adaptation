@@ -128,85 +128,54 @@ class Trainer(Solver):
 
     def load_data(self):
 
-        self.load_wsj0_data()
-        self.load_vctk_data()
+        # Set sup&uns dataset
+        dset = self.config['data'].get('dset', 'wsj0')
+        seg_len = self.config['data']['segment']
 
-        # Set training dataset
-        dset = 'wsj0'
-        if 'dset' in self.config['data']:
-            dset = self.config['data']['dset']
+        uns_dset = self.config['data'].get('uns_dset', 'vctk')
+        uns_seg_len = self.config['data'].get('uns_segment', 2.0)
 
-        if dset == 'wsj0':
-            self.sup_tr_loader = self.wsj0_tr_loader
-            self.sup_cv_loader = self.wsj0_cv_loader
-            self.uns_tr_gen = inf_data_gen(self.vctk_tr_loader)
-            self.uns_cv_loader = self.vctk_cv_loader
-            self.sup_dset = 'wsj0'
-            self.uns_dset = 'vctk'
-        else:
-            self.sup_tr_loader = self.vctk_tr_loader
-            self.sup_cv_loader = self.vctk_cv_loader
-            self.uns_tr_gen = inf_data_gen(self.wsj0_tr_loader)
-            self.uns_cv_loader = self.wsj0_cv_loader
-            self.sup_dset = 'vctk'
-            self.uns_dset = 'wsj0'
+        print(f'Supvised Dataset   : {dset}')
+        print(f'Unsupvised Dataset : {uns_dset}')
 
-    def load_wsj0_data(self):
+        self.sup_dset = dset
+        self.uns_dset = uns_dset
+        self.sup_tr_loader, self.sup_cv_loader = self.load_dset(self.sup_dset, seg_len)
+        self.uns_tr_loader, self.uns_cv_loader = self.load_dset(self.uns_dset, uns_seg_len)
+        self.uns_tr_gen = inf_data_gen(self.uns_tr_loader)
 
-        seg_len = self.config['data']['wsj0']['segment']
-        audio_root = self.config['data']['wsj_root']
+    def load_dset(self, dset, seg_len):
+        # root: wsj0_root, vctk_root, libri_root
+        d = 'wsj' if dset == 'wsj0' else dset # stupid error
+        audio_root = self.config['data'][f'{d}_root']
+        tr_list = f'./data/{dset}/id_list/tr.pkl'
+        cv_list = f'./data/{dset}/id_list/cv.pkl'
+        sp_factors = None
 
-        trainset = wsj0('./data/wsj0/id_list/tr.pkl',
+        trainset = wsj0(tr_list,
                 audio_root = audio_root,
                 seg_len = seg_len,
                 pre_load = False,
                 one_chunk_in_utt = True,
-                mode = 'tr')
-        self.wsj0_tr_loader = DataLoader(trainset,
+                mode = 'tr',
+                sp_factors = sp_factors)
+        tr_loader = DataLoader(trainset,
                 batch_size = self.batch_size,
                 shuffle = True,
-                num_workers = self.num_workers,
-                drop_last = True)
+                num_workers = self.num_workers)
 
-        devset = wsj0_eval('./data/wsj0/id_list/cv.pkl',
+        devset = wsj0_eval(cv_list,
                 audio_root = audio_root,
                 pre_load = False)
-        self.wsj0_cv_loader = DataLoader(devset,
+        cv_loader = DataLoader(devset,
                 batch_size = self.batch_size,
                 shuffle = False,
                 num_workers = self.num_workers)
-
-    def load_vctk_data(self):
-
-        seg_len = self.config['data']['vctk']['segment']
-        audio_root = self.config['data']['vctk_root']
-
-        trainset = wsj0('./data/vctk/id_list/tr.pkl',
-                audio_root = audio_root,
-                seg_len = seg_len,
-                pre_load = False,
-                one_chunk_in_utt = True,
-                mode = 'tr')
-        self.vctk_tr_loader = DataLoader(trainset,
-                batch_size = self.batch_size,
-                shuffle = True,
-                num_workers = self.num_workers,
-                drop_last = True)
-
-        devset = wsj0_eval('./data/vctk/id_list/cv.pkl',
-                audio_root = audio_root,
-                pre_load = False)
-        self.vctk_cv_loader = DataLoader(devset,
-                batch_size = self.batch_size,
-                shuffle = False,
-                num_workers = self.num_workers)
+        return tr_loader, cv_loader
 
     def set_model(self):
         self.model = PiMtConvTasNet(self.config['model'])
         self.model = self.model.to(DEV)
-
-        #self.mse_loss = nn.MSELoss().to(DEV)
-        self.mse_loss = PITMSELoss().to(DEV)
 
         if self.algo == 'mt':
             # TODO gen teacher model
