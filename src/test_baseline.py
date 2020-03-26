@@ -38,7 +38,7 @@ class Tester(Solver):
         self.batch_size = 1
         self.num_workers = 4
 
-        save_dict = torch.load(self.checkpoint)
+        save_dict = torch.load(self.checkpoint, map_location=torch.device('cpu'))
         self.epoch = save_dict['epoch']
         self.valid_score = save_dict['valid_score']
         self.optim_dict = save_dict['optim']
