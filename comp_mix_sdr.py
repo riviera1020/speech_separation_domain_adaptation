@@ -1,5 +1,3 @@
-
-
 import os
 import json
 import numpy as np
@@ -14,11 +12,17 @@ from src.sep_utils import remove_pad
 
 NCOL = 100
 
-def load_wsj0_data():
-    audio_root = '/home/riviera1020/Big/Corpus/wsj0-mix/'
+def load_data(audio_root, data_root):
     batch_size = 1
     num_workers = 2
-    devset = wsj0_eval('./data/wsj0/id_list/cv.pkl',
+    cv_list = os.path.join(data_root, 'id_list/cv.pkl')
+    tt_list = os.path.join(data_root, 'id_list/tt.pkl')
+
+    print(f'Load following list:')
+    print(f'\t cv: {cv_list}')
+    print(f'\t tt: {tt_list}')
+
+    devset = wsj0_eval(cv_list,
             audio_root = audio_root,
             pre_load = False)
     cv_loader = DataLoader(devset,
@@ -26,7 +30,7 @@ def load_wsj0_data():
             shuffle = False,
             num_workers = num_workers)
 
-    testset = wsj0_eval('./data/wsj0/id_list/tt.pkl',
+    testset = wsj0_eval(tt_list,
             audio_root = audio_root,
             pre_load = False)
     tt_loader = DataLoader(testset,
@@ -34,49 +38,6 @@ def load_wsj0_data():
             shuffle = False,
             num_workers = num_workers)
 
-    return cv_loader, tt_loader
-
-def load_vctk_data():
-    audio_root = '/home/riviera1020/Big/Corpus/vctk-mix/wav8k/min/'
-    batch_size = 1
-    num_workers = 2
-    devset = VCTK_eval('./data/vctk/id_list/cv.pkl',
-            audio_root = audio_root,
-            pre_load = False)
-    cv_loader = DataLoader(devset,
-            batch_size = batch_size,
-            shuffle = False,
-            num_workers = num_workers)
-
-    testset = VCTK_eval('./data/vctk/id_list/tt.pkl',
-            audio_root = audio_root,
-            pre_load = False)
-    tt_loader = DataLoader(testset,
-            batch_size = batch_size,
-            shuffle = False,
-            num_workers = num_workers)
-
-    return cv_loader, tt_loader
-
-def load_libri_data():
-    audio_root = '/home/riviera1020/Big/Corpus/libri-mix/wav8k/min/'
-    batch_size = 1
-    num_workers = 2
-    devset = wsj0_eval('./data/libri/id_list/cv.pkl',
-            audio_root = audio_root,
-            pre_load = False)
-    cv_loader = DataLoader(devset,
-            batch_size = batch_size,
-            shuffle = False,
-            num_workers = num_workers)
-
-    testset = wsj0_eval('./data/libri/id_list/tt.pkl',
-            audio_root = audio_root,
-            pre_load = False)
-    tt_loader = DataLoader(testset,
-            batch_size = batch_size,
-            shuffle = False,
-            num_workers = num_workers)
     return cv_loader, tt_loader
 
 def comp_oneset(loader):
@@ -123,22 +84,18 @@ def dump_result(total_sdr, result, out_dir, prefix, dump_all = False):
         json_name = os.path.join(out_dir, f'{prefix}.json')
         json.dump(result, open(json_name, 'w'))
 
-def main(out_dir, cv_loader, tt_loader):
+def main(out_dir, cv_loader, tt_loader, dump_all = False):
 
     total_sdr, result = comp_oneset(cv_loader)
-    dump_result(total_sdr, result, out_dir, prefix = 'cv', dump_all = True)
+    dump_result(total_sdr, result, out_dir, prefix = 'cv', dump_all = dump_all)
 
     total_sdr, result = comp_oneset(tt_loader)
-    dump_result(total_sdr, result, out_dir, prefix = 'tt', dump_all = True)
+    dump_result(total_sdr, result, out_dir, prefix = 'tt', dump_all = dump_all)
 
-#out_dir = './data/libri/mix_sdr/'
-#cv_loader, tt_loader = load_libri_data()
-#main(out_dir, cv_loader, tt_loader)
+# change here
+audio_root = '/home/riviera1020/Big/Corpus/wham-mix/wav8k/min/'
+data_root = './data/wham/'
 
-out_dir = './data/wsj0/mix_sdr/'
-cv_loader, tt_loader = load_wsj0_data()
-main(out_dir, cv_loader, tt_loader)
-
-out_dir = './data/vctk/mix_sdr/'
-cv_loader, tt_loader = load_vctk_data()
+out_dir = os.path.join(data_root, 'mix_sdr')
+cv_loader, tt_loader = load_data(audio_root, data_root)
 main(out_dir, cv_loader, tt_loader)
