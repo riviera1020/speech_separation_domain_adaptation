@@ -12,7 +12,6 @@ import torch.nn as nn
 
 from apex import amp
 from tqdm import tqdm
-from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 
 from src.solver import Solver
