@@ -109,6 +109,33 @@ class Tester(Solver):
                 num_workers = self.num_workers)
         return cv_loader, tt_loader
 
+    def load_dset(self, dset):
+        # root: wsj0_root, vctk_root, libri_root
+        d = 'wsj' if dset == 'wsj0' else dset # stupid error
+        audio_root = self.config['data'][f'{d}_root']
+        cv_list = f'./data/{dset}/id_list/cv.pkl'
+        tt_list = f'./data/{dset}/id_list/tt.pkl'
+
+        print(f'Load cv from {cv_list}')
+        print(f'Load tt from {tt_list}')
+
+        devset = wsj0_eval(cv_list,
+                audio_root = audio_root,
+                pre_load = False)
+        cv_loader = DataLoader(devset,
+                batch_size = self.batch_size,
+                shuffle = False,
+                num_workers = self.num_workers)
+
+        testset = wsj0_eval(tt_list,
+                audio_root = audio_root,
+                pre_load = False)
+        tt_loader = DataLoader(testset,
+                batch_size = self.batch_size,
+                shuffle = False,
+                num_workers = self.num_workers)
+        return cv_loader, tt_loader
+
     def set_model(self, state_dict):
         self.model = ConvTasNet(self.tr_config['model']).to(DEV)
         self.model.load_state_dict(state_dict)
@@ -122,18 +149,20 @@ class Tester(Solver):
         self.model.eval()
         dsets = self.config['data']['dsets']
 
+        ds = ', '.join(dsets)
+        print(f"Evaluate following datasets: {ds}")
+
         result_dict = {}
 
         for dset in dsets:
-            if dset == 'wsj0':
-                cv_loader, tt_loader = self.load_wsj0_data()
-                sdr0 = load_mix_sdr('./data/wsj0/mix_sdr/', ['cv', 'tt'])
-            elif dset == 'vctk':
-                cv_loader, tt_loader = self.load_vctk_data()
-                sdr0 = load_mix_sdr('./data/vctk/mix_sdr/', ['cv', 'tt'])
-            elif dset == 'libri':
-                cv_loader, tt_loader = self.load_libri_data()
-                sdr0 = load_mix_sdr('./data/libri/mix_sdr/', ['cv', 'tt'])
+            cv_loader, tt_loader = self.load_dset(dset)
+            sdr0 = load_mix_sdr(f'./data/{dset}/mix_sdr/', ['cv', 'tt'])
+            #if dset == 'wsj0':
+            #    sdr0 = load_mix_sdr('./data/wsj0/mix_sdr/', ['cv', 'tt'])
+            #elif dset == 'vctk':
+            #    sdr0 = load_mix_sdr('./data/vctk/mix_sdr/', ['cv', 'tt'])
+            #elif dset == 'libri':
+            #    sdr0 = load_mix_sdr('./data/libri/mix_sdr/', ['cv', 'tt'])
 
             result_dict[dset] = {}
 
