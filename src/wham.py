@@ -261,6 +261,7 @@ class wham_eval(Dataset):
             mix_audio = mix_audio.astype(np.float32)
             s1_audio = s1_audio.astype(np.float32)
             s2_audio = s2_audio.astype(np.float32)
+            noise_audio = noise_audio.astype(np.float32)
 
         ilen = len(mix_audio)
         noise_audio = noise_audio[:ilen]

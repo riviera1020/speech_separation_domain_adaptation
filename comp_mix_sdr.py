@@ -2,15 +2,21 @@ import os
 import json
 import numpy as np
 
+from pathlib import Path
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from mir_eval.separation import bss_eval_sources
 
-from src.vctk import VCTK_eval
+from src.utils import read_scale, NCOL
 from src.dataset import wsj0_eval
+from src.wham import wham_eval
 from src.sep_utils import remove_pad
 
-NCOL = 100
+def load_dset(audio_root, data_root, dset):
+    if 'wham' not in dset:
+        return load_data(audio_root, data_root)
+    else:
+        return load_wham(audio_root, data_root)
 
 def load_data(audio_root, data_root):
     batch_size = 1
@@ -37,7 +43,40 @@ def load_data(audio_root, data_root):
             batch_size = batch_size,
             shuffle = False,
             num_workers = num_workers)
+    return cv_loader, tt_loader
 
+def load_wham(audio_root, data_root):
+    batch_size = 1
+    num_workers = 2
+    cv_list = os.path.join('./data/wsj0/id_list/cv.pkl')
+    tt_list = os.path.join('./data/wsj0/id_list/tt.pkl')
+
+    print(f'Load following list:')
+    print(f'\t cv: {cv_list}')
+    print(f'\t tt: {tt_list}')
+
+    scale = read_scale(data_root)
+    print(f'Load wham data with scale {scale}')
+
+    devset = wham_eval(cv_list,
+            audio_root = audio_root,
+            pre_load = False,
+            mode = 'cv',
+            scale = scale)
+    cv_loader = DataLoader(devset,
+            batch_size = batch_size,
+            shuffle = False,
+            num_workers = num_workers)
+
+    testset = wham_eval(tt_list,
+            audio_root = audio_root,
+            pre_load = False,
+            mode = 'tt',
+            scale = scale)
+    tt_loader = DataLoader(testset,
+            batch_size = batch_size,
+            shuffle = False,
+            num_workers = num_workers)
     return cv_loader, tt_loader
 
 def comp_oneset(loader):
@@ -93,9 +132,12 @@ def main(out_dir, cv_loader, tt_loader, dump_all = False):
     dump_result(total_sdr, result, out_dir, prefix = 'tt', dump_all = dump_all)
 
 # change here
-audio_root = '/home/riviera1020/Big/Corpus/wham-mix/wav8k/min/'
-data_root = './data/wham/'
+dset = 'wham-easy'
+audio_root = '/home/riviera1020/Big/Corpus/wsj0-mix/'
+data_root = './data/wham-easy/'
 
 out_dir = os.path.join(data_root, 'mix_sdr')
-cv_loader, tt_loader = load_data(audio_root, data_root)
+Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+cv_loader, tt_loader = load_dset(audio_root, data_root, dset)
 main(out_dir, cv_loader, tt_loader)

@@ -1,3 +1,4 @@
+import os
 import yaml
 import torch
 import _pickle as cPickle
@@ -27,6 +28,12 @@ def read_config(path, local_path):
             config['data'] = {}
         config['data'][key] = path
     return config
+
+def read_scale(path):
+    with open(os.path.join(path, 'scale')) as f:
+        scale = f.readlines()[0].rstrip()
+        scale = float(scale)
+    return scale
 
 def inf_data_gen(loader):
     while True:
