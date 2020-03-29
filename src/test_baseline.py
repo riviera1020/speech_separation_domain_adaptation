@@ -47,7 +47,7 @@ class Tester(Solver):
     def load_dset(self, dset):
         # root: wsj0_root, vctk_root, libri_root
         d = 'wsj' if dset == 'wsj0' else dset # stupid error
-        if 'wham' in d:
+        if 'wham' in dset:
             # load wham, wham-easy
             return self.load_wham(dset)
 

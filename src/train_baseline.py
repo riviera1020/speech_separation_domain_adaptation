@@ -11,12 +11,13 @@ from torch.utils.data import DataLoader
 
 from src.solver import Solver
 from src.saver import Saver
-from src.utils import DEV, DEBUG, NCOL
+from src.utils import DEV, DEBUG, NCOL, read_scale
 from src.conv_tasnet import ConvTasNet
 from src.dprnn import DualRNN
 from src.adanet import ADANet
 from src.pit_criterion import cal_loss, SISNR
 from src.dataset import wsj0, wsj0_eval
+from src.wham import wham, wham_eval
 from src.ranger import Ranger
 from src.evaluation import cal_SDR, cal_SISNRi, cal_SISNR
 from src.sep_utils import remove_pad, load_mix_sdr
@@ -85,35 +86,26 @@ class Trainer(Solver):
 
     def load_data(self):
         # Set training dataset
-        dset = 'wsj0'
-        if 'dset' in self.config['data']:
-            dset = self.config['data']['dset']
+        dset = self.config['data'].get('dset', 'wsj0')
         self.dset = dset
 
-        self.load_dset('wsj0')
-        self.load_dset('vctk')
-        self.load_dset('libri')
+        cv_dsets = self.config['data'].get('cv_dsets', [ 'wsj0', 'vctk' ])
+        if dset not in cv_dsets:
+            cv_dsets.append(dset)
 
-        self.dsets = {
-                'wsj0': {
-                    'tr': self.wsj0_tr_loader,
-                    'cv': self.wsj0_cv_loader,
-                    },
-                'vctk': {
-                    'tr': self.vctk_tr_loader,
-                    'cv': self.vctk_cv_loader,
-                    },
-                'libri': {
-                    'tr': self.libri_tr_loader,
-                    'cv': self.libri_cv_loader,
-                    },
-                }
+        self.dsets = {}
+        for d in cv_dsets:
+            tr_loader, cv_loader = self.load_dset(d)
+            self.dsets[d] = { 'tr': tr_loader, 'cv': cv_loader }
 
     def load_dset(self, dset):
         seg_len = self.config['data']['segment']
 
         # root: wsj0_root, vctk_root, libri_root
         d = 'wsj' if dset == 'wsj0' else dset # stupid error
+        if 'wham' in dset:
+            return self.load_wham(dset)
+
         audio_root = self.config['data'][f'{d}_root']
         tr_list = f'./data/{dset}/id_list/tr.pkl'
         cv_list = f'./data/{dset}/id_list/cv.pkl'
@@ -139,9 +131,39 @@ class Trainer(Solver):
                 batch_size = self.batch_size,
                 shuffle = False,
                 num_workers = self.num_workers)
+        return tr_loader, cv_loader
 
-        setattr(self, f'{dset}_tr_loader', tr_loader)
-        setattr(self, f'{dset}_cv_loader', cv_loader)
+    def load_wham(self, dset):
+        audio_root = self.config['data'][f'wsj_root']
+        seg_len = self.config['data']['segment']
+        tr_list = f'./data/wsj0/id_list/tr.pkl'
+        cv_list = f'./data/wsj0/id_list/cv.pkl'
+
+        scale = read_scale(f'./data/{dset}')
+        print(f'Load wham data with scale {scale}')
+
+        trainset = wham(tr_list,
+                audio_root = audio_root,
+                seg_len = seg_len,
+                pre_load = False,
+                one_chunk_in_utt = True,
+                mode = 'tr',
+                scale = scale)
+        tr_loader = DataLoader(trainset,
+                batch_size = self.batch_size,
+                shuffle = True,
+                num_workers = self.num_workers)
+
+        devset = wham_eval(cv_list,
+                audio_root = audio_root,
+                pre_load = False,
+                mode = 'cv',
+                scale = scale)
+        cv_loader = DataLoader(devset,
+                batch_size = self.batch_size,
+                shuffle = False,
+                num_workers = self.num_workers)
+        return tr_loader, cv_loader
 
     def set_model(self):
 
