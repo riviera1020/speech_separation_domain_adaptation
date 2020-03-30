@@ -205,7 +205,7 @@ class Trainer(Solver):
                     weight_decay = weight_decay)
         elif optim_type == 'ranger':
             opt = Ranger(
-                    model.params,
+                    params,
                     lr = lr,
                     weight_decay = weight_decay)
         else:
