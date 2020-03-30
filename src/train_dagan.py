@@ -339,6 +339,7 @@ class Trainer(Solver):
         self.G.train()
         total_loss = 0.
         total_sisnri = 0.
+        total_uns_sisnri = 0.
         cnt = 0
 
         for i, sample in enumerate(tqdm(tr_loader, ncols = NCOL)):
@@ -371,14 +372,28 @@ class Trainer(Solver):
             self.train_dis_once(self.step, self.sup_gen, self.uns_gen)
             self.train_gen_once(self.step, self.sup_gen, self.uns_gen)
 
+            with torch.no_grad():
+                uns_sample = self.uns_gen.__next__()
+                padded_mixture = uns_sample['mix'].to(DEV)
+                padded_source = uns_sample['ref'].to(DEV)
+                mixture_lengths = uns_sample['ilens'].to(DEV)
+
+                estimate_source, _ = self.G(padded_mixture)
+                loss, max_snr, estimate_source, reorder_estimate_source = \
+                    cal_loss(padded_source, estimate_source, mixture_lengths)
+                mix_sisnr = SISNR(padded_source, padded_mixture, mixture_lengths)
+                total_uns_sisnri += (max_snr - mix_sisnr).sum()
+
             self.step += 1
             self.writer.step()
 
         total_loss = total_loss / cnt
         total_sisnri = total_sisnri / cnt
+        total_uns_sisnri = total_uns_sisnri / cnt
 
         meta = { 'epoch_loss': total_loss,
-                 'epoch_sisnri': total_sisnri }
+                 'epoch_sisnri': total_sisnri,
+                 'epoch_uns_sisnri': total_uns_sisnri }
         self.writer.log_epoch_info('train', meta)
 
     def train_dis_once(self, step, src_gen, tgt_gen, pretrain = False):
