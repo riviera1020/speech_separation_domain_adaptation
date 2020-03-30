@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 from src.solver import Solver
 from src.utils import DEV, DEBUG, NCOL, read_scale
 from src.conv_tasnet import ConvTasNet
+from src.adanet import ADANet
 from src.pit_criterion import cal_loss
 from src.dataset import wsj0_eval
 from src.wham import wham_eval
@@ -105,7 +106,11 @@ class Tester(Solver):
         return cv_loader, tt_loader
 
     def set_model(self, state_dict):
-        self.model = ConvTasNet(self.tr_config['model']).to(DEV)
+        model_type = self.tr_config['model'].get('type', 'convtasnet')
+        if model_type == 'adanet':
+            self.model = ADANet(self.tr_config['model']).to(DEV)
+        else:
+            self.model = ConvTasNet(self.tr_config['model']).to(DEV)
         self.model.load_state_dict(state_dict)
 
     def print_info(self):
