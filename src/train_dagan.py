@@ -10,7 +10,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from tqdm import tqdm
-from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 
 from src.solver import Solver
