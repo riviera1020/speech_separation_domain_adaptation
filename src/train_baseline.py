@@ -11,12 +11,13 @@ from torch.utils.data import DataLoader
 
 from src.solver import Solver
 from src.saver import Saver
-from src.utils import DEV, DEBUG, NCOL
+from src.utils import DEV, DEBUG, NCOL, read_scale
 from src.conv_tasnet import ConvTasNet
 from src.dprnn import DualRNN
 from src.adanet import ADANet
 from src.pit_criterion import cal_loss, SISNR
 from src.dataset import wsj0, wsj0_eval
+from src.wham import wham, wham_eval
 from src.ranger import Ranger
 from src.evaluation import cal_SDR, cal_SISNRi, cal_SISNR
 from src.sep_utils import remove_pad, load_mix_sdr
@@ -37,17 +38,39 @@ class Trainer(Solver):
         ts = time.time()
         st = datetime.datetime.fromtimestamp(ts).strftime('%Y_%m_%d_%H_%M_%S')
 
-        save_name = self.exp_name + '-' + st
-        self.save_dir = os.path.join(config['solver']['save_dir'], save_name)
-        self.safe_mkdir(self.save_dir)
-        self.saver = Saver(config['solver']['max_save_num'], self.save_dir, 'max')
-        yaml.dump(config, open(os.path.join(self.save_dir, 'config.yaml'), 'w'),
-                default_flow_style = False ,indent = 4)
+        self.resume_model = False
+        resume_exp_name = config['solver'].get('resume_exp_name', '')
+        if resume_exp_name:
+            self.resume_model = True
+            exp_name = resume_exp_name
+            self.save_dir = os.path.join(self.config['solver']['save_dir'], exp_name)
+            self.log_dir = os.path.join(self.config['solver']['log_dir'], exp_name)
 
-        log_name = self.exp_name + '-' + st
-        self.log_dir = os.path.join(config['solver']['log_dir'], log_name)
-        self.safe_mkdir(self.log_dir)
-        self.writer = Dashboard(log_name, config, self.log_dir)
+            if not os.path.isdir(self.save_dir) or not os.path.isdir(self.log_dir):
+                print('Resume Exp name Error')
+                exit()
+
+            self.saver = Saver(
+                    self.config['solver']['max_save_num'],
+                    self.save_dir,
+                    'max',
+                    resume = True,
+                    resume_score_fn = lambda x: x['valid_score']['valid_sisnri'])
+
+            self.writer = Dashboard(exp_name, self.config, self.log_dir, resume=True)
+
+        else:
+            save_name = self.exp_name + '-' + st
+            self.save_dir = os.path.join(config['solver']['save_dir'], save_name)
+            self.safe_mkdir(self.save_dir)
+            self.saver = Saver(config['solver']['max_save_num'], self.save_dir, 'max')
+            yaml.dump(config, open(os.path.join(self.save_dir, 'config.yaml'), 'w'),
+                    default_flow_style = False ,indent = 4)
+
+            log_name = self.exp_name + '-' + st
+            self.log_dir = os.path.join(config['solver']['log_dir'], log_name)
+            self.safe_mkdir(self.log_dir)
+            self.writer = Dashboard(log_name, config, self.log_dir)
 
         self.epochs = config['solver']['epochs']
         self.start_epoch = config['solver']['start_epoch']
@@ -63,35 +86,26 @@ class Trainer(Solver):
 
     def load_data(self):
         # Set training dataset
-        dset = 'wsj0'
-        if 'dset' in self.config['data']:
-            dset = self.config['data']['dset']
+        dset = self.config['data'].get('dset', 'wsj0')
         self.dset = dset
 
-        self.load_dset('wsj0')
-        self.load_dset('vctk')
-        self.load_dset('libri')
+        cv_dsets = self.config['data'].get('cv_dsets', [ 'wsj0', 'vctk' ])
+        if dset not in cv_dsets:
+            cv_dsets.append(dset)
 
-        self.dsets = {
-                'wsj0': {
-                    'tr': self.wsj0_tr_loader,
-                    'cv': self.wsj0_cv_loader,
-                    },
-                'vctk': {
-                    'tr': self.vctk_tr_loader,
-                    'cv': self.vctk_cv_loader,
-                    },
-                'libri': {
-                    'tr': self.libri_tr_loader,
-                    'cv': self.libri_cv_loader,
-                    },
-                }
+        self.dsets = {}
+        for d in cv_dsets:
+            tr_loader, cv_loader = self.load_dset(d)
+            self.dsets[d] = { 'tr': tr_loader, 'cv': cv_loader }
 
     def load_dset(self, dset):
         seg_len = self.config['data']['segment']
 
         # root: wsj0_root, vctk_root, libri_root
         d = 'wsj' if dset == 'wsj0' else dset # stupid error
+        if 'wham' in dset:
+            return self.load_wham(dset)
+
         audio_root = self.config['data'][f'{d}_root']
         tr_list = f'./data/{dset}/id_list/tr.pkl'
         cv_list = f'./data/{dset}/id_list/cv.pkl'
@@ -117,9 +131,39 @@ class Trainer(Solver):
                 batch_size = self.batch_size,
                 shuffle = False,
                 num_workers = self.num_workers)
+        return tr_loader, cv_loader
 
-        setattr(self, f'{dset}_tr_loader', tr_loader)
-        setattr(self, f'{dset}_cv_loader', cv_loader)
+    def load_wham(self, dset):
+        audio_root = self.config['data'][f'wsj_root']
+        seg_len = self.config['data']['segment']
+        tr_list = f'./data/wsj0/id_list/tr.pkl'
+        cv_list = f'./data/wsj0/id_list/cv.pkl'
+
+        scale = read_scale(f'./data/{dset}')
+        print(f'Load wham data with scale {scale}')
+
+        trainset = wham(tr_list,
+                audio_root = audio_root,
+                seg_len = seg_len,
+                pre_load = False,
+                one_chunk_in_utt = True,
+                mode = 'tr',
+                scale = scale)
+        tr_loader = DataLoader(trainset,
+                batch_size = self.batch_size,
+                shuffle = True,
+                num_workers = self.num_workers)
+
+        devset = wham_eval(cv_list,
+                audio_root = audio_root,
+                pre_load = False,
+                mode = 'cv',
+                scale = scale)
+        cv_loader = DataLoader(devset,
+                batch_size = self.batch_size,
+                shuffle = False,
+                num_workers = self.num_workers)
+        return tr_loader, cv_loader
 
     def set_model(self):
 
@@ -143,22 +187,30 @@ class Trainer(Solver):
             print(info_dict['valid_score'])
 
         optim_dict = None
-        if 'resume' in self.config['solver']:
-            model_path = self.config['solver']['resume']
-            if model_path != '':
-                print('Resuming Training')
-                print(f'Loading Model: {model_path}')
+        if self.resume_model:
+            model_path = os.path.join(self.save_dir, 'latest.pth')
+            print('Resuming Training')
+            print(f'Loading Model: {model_path}')
 
-                info_dict = torch.load(model_path)
+            info_dict = torch.load(model_path)
 
-                print(f"Previous score: {info_dict['valid_score']}")
-                self.start_step = info_dict['epoch'] + 1
+            print(f"Previous score: {info_dict['valid_score']}")
+            self.start_epoch = info_dict['epoch'] + 1
+            if 'step' in info_dict:
+                self.step = info_dict['step']
 
-                self.model.load_state_dict(info_dict['state_dict'])
-                print('Loading complete')
+            self.model.load_state_dict(info_dict['state_dict'])
+            print('Loading complete')
 
-                if self.config['solver']['resume_optim']:
-                    optim_dict = info_dict['optim']
+            if self.config['solver']['resume_optim']:
+                optim_dict = info_dict['optim']
+
+            # dashboard is one-base
+            self.writer.set_epoch(self.start_epoch + 1)
+            self.writer.set_step(self.step + 1)
+
+            print(self.start_epoch)
+            print(self.step)
 
         lr = self.config['optim']['lr']
         weight_decay = self.config['optim']['weight_decay']

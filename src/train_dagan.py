@@ -15,12 +15,13 @@ from torch.utils.data import DataLoader
 
 from src.solver import Solver
 from src.saver import Saver
-from src.utils import DEV, DEBUG, NCOL, inf_data_gen
+from src.utils import DEV, DEBUG, NCOL, inf_data_gen, read_scale
 from src.conv_tasnet import ConvTasNet
 from src.da_conv_tasnet import DAConvTasNet
 from src.domain_cls import DomainClassifier
 from src.pit_criterion import cal_loss, SISNR
 from src.dataset import wsj0, wsj0_eval
+from src.wham import wham, wham_eval
 from src.scheduler import RampScheduler, ConstantScheduler, DANNScheduler
 from src.gradient_penalty import calc_gradient_penalty
 from src.dashboard import Dashboard
@@ -106,21 +107,16 @@ class Trainer(Solver):
         self.uns_gen = inf_data_gen(self.load_tr_dset(self.uns_dset, uns_len))
 
         # Load cv loader
-        self.dsets = {
-                'wsj0': {
-                    'cv': self.load_cv_dset('wsj0'),
-                    },
-                'vctk': {
-                    'cv': self.load_cv_dset('vctk'),
-                    },
-                'libri': {
-                    'cv': self.load_cv_dset('libri'),
-                    },
-                }
+        self.dsets = {}
+        for d in [ self.dset, self.uns_dset ]:
+            self.dsets[d] = { 'cv': self.load_cv_dset(d) }
 
     def load_tr_dset(self, dset, seg_len):
         # root: wsj0_root, vctk_root, libri_root
         d = 'wsj' if dset == 'wsj0' else dset # stupid error
+        if 'wham' in dset:
+            return self.load_wham(dset, seg_len, 'tr')
+
         audio_root = self.config['data'][f'{d}_root']
         tr_list = f'./data/{dset}/id_list/tr.pkl'
         trainset = wsj0(tr_list,
@@ -139,6 +135,9 @@ class Trainer(Solver):
     def load_cv_dset(self, dset):
         # root: wsj0_root, vctk_root, libri_root
         d = 'wsj' if dset == 'wsj0' else dset # stupid error
+        if 'wham' in dset:
+            return self.load_wham(dset, 'cv')
+
         audio_root = self.config['data'][f'{d}_root']
         cv_list = f'./data/{dset}/id_list/cv.pkl'
         devset = wsj0_eval(cv_list,
@@ -149,6 +148,39 @@ class Trainer(Solver):
                 shuffle = False,
                 num_workers = self.num_workers)
         return cv_loader
+
+    def load_wham(self, dset, seg_len, mode):
+        audio_root = self.config['data'][f'wsj_root']
+        tr_list = f'./data/wsj0/id_list/tr.pkl'
+        cv_list = f'./data/wsj0/id_list/cv.pkl'
+
+        scale = read_scale(f'./data/{dset}')
+        print(f'Load wham data with scale {scale}')
+
+        if mode == 'tr':
+            trainset = wham(tr_list,
+                    audio_root = audio_root,
+                    seg_len = seg_len,
+                    pre_load = False,
+                    one_chunk_in_utt = True,
+                    mode = 'tr',
+                    scale = scale)
+            tr_loader = DataLoader(trainset,
+                    batch_size = self.batch_size,
+                    shuffle = True,
+                    num_workers = self.num_workers)
+            return tr_loader
+        else:
+            devset = wham_eval(cv_list,
+                    audio_root = audio_root,
+                    pre_load = False,
+                    mode = 'cv',
+                    scale = scale)
+            cv_loader = DataLoader(devset,
+                    batch_size = self.batch_size,
+                    shuffle = False,
+                    num_workers = self.num_workers)
+            return cv_loader
 
     def set_optim(self, models, opt_config):
 
@@ -307,6 +339,7 @@ class Trainer(Solver):
         self.G.train()
         total_loss = 0.
         total_sisnri = 0.
+        total_uns_sisnri = 0.
         cnt = 0
 
         for i, sample in enumerate(tqdm(tr_loader, ncols = NCOL)):
@@ -339,14 +372,28 @@ class Trainer(Solver):
             self.train_dis_once(self.step, self.sup_gen, self.uns_gen)
             self.train_gen_once(self.step, self.sup_gen, self.uns_gen)
 
+            with torch.no_grad():
+                uns_sample = self.uns_gen.__next__()
+                padded_mixture = uns_sample['mix'].to(DEV)
+                padded_source = uns_sample['ref'].to(DEV)
+                mixture_lengths = uns_sample['ilens'].to(DEV)
+
+                estimate_source, _ = self.G(padded_mixture)
+                loss, max_snr, estimate_source, reorder_estimate_source = \
+                    cal_loss(padded_source, estimate_source, mixture_lengths)
+                mix_sisnr = SISNR(padded_source, padded_mixture, mixture_lengths)
+                total_uns_sisnri += (max_snr - mix_sisnr).sum()
+
             self.step += 1
             self.writer.step()
 
         total_loss = total_loss / cnt
         total_sisnri = total_sisnri / cnt
+        total_uns_sisnri = total_uns_sisnri / cnt
 
         meta = { 'epoch_loss': total_loss,
-                 'epoch_sisnri': total_sisnri }
+                 'epoch_sisnri': total_sisnri,
+                 'epoch_uns_sisnri': total_uns_sisnri }
         self.writer.log_epoch_info('train', meta)
 
     def train_dis_once(self, step, src_gen, tgt_gen, pretrain = False):

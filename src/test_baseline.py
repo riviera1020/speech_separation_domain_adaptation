@@ -11,24 +11,20 @@ from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 
 from src.solver import Solver
-from src.utils import DEV, DEBUG, NCOL
+from src.utils import DEV, DEBUG, NCOL, read_scale
 from src.conv_tasnet import ConvTasNet
 from src.pit_criterion import cal_loss
 from src.dataset import wsj0_eval
-from src.vctk import VCTK_eval
+from src.wham import wham_eval
 from src.evaluation import cal_SDR, cal_SISNRi
 from src.sep_utils import remove_pad, load_mix_sdr
 
 class Tester(Solver):
-
-    def __init__(self, config, stream = None):
+    def __init__(self, config):
         super(Tester, self).__init__(config)
 
         self.tr_config = config['solver']['train_config']
         self.tr_config = yaml.load(open(self.tr_config), Loader=yaml.FullLoader)
-
-        #ts = time.time()
-        #st = datetime.datetime.fromtimestamp(ts).strftime('%Y_%m_%d_%H_%M_%S')
 
         self.result_dir = config['solver']['result_dir']
         self.safe_mkdir(self.result_dir)
@@ -46,11 +42,23 @@ class Tester(Solver):
         state_dict = save_dict['state_dict']
         self.set_model(state_dict)
 
-    def load_wsj0_data(self):
+        self.compute_sdr = config['solver'].get('compute_sdr', True)
 
-        audio_root = self.config['data']['wsj_root']
+    def load_dset(self, dset):
+        # root: wsj0_root, vctk_root, libri_root
+        d = 'wsj' if dset == 'wsj0' else dset # stupid error
+        if 'wham' in dset:
+            # load wham, wham-easy
+            return self.load_wham(dset)
 
-        devset = wsj0_eval('./data/wsj0/id_list/cv.pkl',
+        audio_root = self.config['data'][f'{d}_root']
+        cv_list = f'./data/{dset}/id_list/cv.pkl'
+        tt_list = f'./data/{dset}/id_list/tt.pkl'
+
+        print(f'Load cv from {cv_list}')
+        print(f'Load tt from {tt_list}')
+
+        devset = wsj0_eval(cv_list,
                 audio_root = audio_root,
                 pre_load = False)
         cv_loader = DataLoader(devset,
@@ -58,7 +66,7 @@ class Tester(Solver):
                 shuffle = False,
                 num_workers = self.num_workers)
 
-        testset = wsj0_eval('./data/wsj0/id_list/tt.pkl',
+        testset = wsj0_eval(tt_list,
                 audio_root = audio_root,
                 pre_load = False)
         tt_loader = DataLoader(testset,
@@ -67,42 +75,29 @@ class Tester(Solver):
                 num_workers = self.num_workers)
         return cv_loader, tt_loader
 
-    def load_vctk_data(self):
+    def load_wham(self, dset):
+        audio_root = self.config['data'][f'wsj_root']
+        cv_list = f'./data/wsj0/id_list/cv.pkl'
+        tt_list = f'./data/wsj0/id_list/tt.pkl'
 
-        audio_root = self.config['data']['vctk_root']
+        scale = read_scale(f'./data/{dset}')
+        print(f'Load wham data with scale {scale}')
 
-        devset = VCTK_eval('./data/vctk/id_list/cv.pkl',
+        devset = wham_eval(cv_list,
                 audio_root = audio_root,
-                pre_load = False)
+                pre_load = False,
+                mode = 'cv',
+                scale = scale)
         cv_loader = DataLoader(devset,
                 batch_size = self.batch_size,
                 shuffle = False,
                 num_workers = self.num_workers)
 
-        testset = VCTK_eval('./data/vctk/id_list/tt.pkl',
+        testset = wham_eval(tt_list,
                 audio_root = audio_root,
-                pre_load = False)
-        tt_loader = DataLoader(testset,
-                batch_size = self.batch_size,
-                shuffle = False,
-                num_workers = self.num_workers)
-        return cv_loader, tt_loader
-
-    def load_libri_data(self):
-
-        audio_root = self.config['data']['libri_root']
-
-        devset = wsj0_eval('./data/libri/id_list/cv.pkl',
-                audio_root = audio_root,
-                pre_load = False)
-        cv_loader = DataLoader(devset,
-                batch_size = self.batch_size,
-                shuffle = False,
-                num_workers = self.num_workers)
-
-        testset = wsj0_eval('./data/libri/id_list/tt.pkl',
-                audio_root = audio_root,
-                pre_load = False)
+                pre_load = False,
+                mode = 'tt',
+                scale = scale)
         tt_loader = DataLoader(testset,
                 batch_size = self.batch_size,
                 shuffle = False,
@@ -122,18 +117,14 @@ class Tester(Solver):
         self.model.eval()
         dsets = self.config['data']['dsets']
 
+        ds = ', '.join(dsets)
+        print(f"Evaluate following datasets: {ds}")
+
         result_dict = {}
 
         for dset in dsets:
-            if dset == 'wsj0':
-                cv_loader, tt_loader = self.load_wsj0_data()
-                sdr0 = load_mix_sdr('./data/wsj0/mix_sdr/', ['cv', 'tt'])
-            elif dset == 'vctk':
-                cv_loader, tt_loader = self.load_vctk_data()
-                sdr0 = load_mix_sdr('./data/vctk/mix_sdr/', ['cv', 'tt'])
-            elif dset == 'libri':
-                cv_loader, tt_loader = self.load_libri_data()
-                sdr0 = load_mix_sdr('./data/libri/mix_sdr/', ['cv', 'tt'])
+            cv_loader, tt_loader = self.load_dset(dset)
+            sdr0 = load_mix_sdr(f'./data/{dset}/mix_sdr/', ['cv', 'tt'])
 
             result_dict[dset] = {}
 
@@ -183,13 +174,17 @@ class Tester(Solver):
                     src_ref = padded_source[b]
                     src_est = reorder_estimate_source[b]
 
-                    total_SDR += cal_SDR(src_ref, src_est)
+                    if self.compute_sdr:
+                        total_SDR += cal_SDR(src_ref, src_est)
                     total_SISNRi += cal_SISNRi(src_ref, src_est, mix)
 
         total_loss /= total_cnt
-        total_SDR /= total_cnt
-        total_SDRi = total_SDR - sdr0[dset]
         total_SISNRi /= total_cnt
+        if self.compute_sdr:
+            total_SDR /= total_cnt
+            total_SDRi = total_SDR - sdr0[dset]
+        else:
+            total_SDRi = 0
 
         result = { 'total_loss': total_loss, 'total_SDRi': total_SDRi, 'total_SISNRi': total_SISNRi }
         return result

@@ -53,6 +53,13 @@ class LSTMClassifer(nn.Module):
         x = self.out(x)
         return x
 
+class Conv2dClassifier(nn.Module):
+    def __init__(self, B, config):
+        super(Conv2dClassifier, self).__init__()
+        self.B = B
+    def forward(self, x):
+        pass
+
 class DomainClassifier(nn.Module):
     def __init__(self, B, config):
         super(DomainClassifier, self).__init__()

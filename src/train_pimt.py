@@ -16,10 +16,11 @@ from torch.utils.data import DataLoader
 
 from src.solver import Solver
 from src.saver import Saver
-from src.utils import DEV, DEBUG, NCOL, inf_data_gen
+from src.utils import DEV, DEBUG, NCOL, inf_data_gen, read_scale
 from src.pimt_conv_tasnet import PiMtConvTasNet, InputTransform, ConsistencyLoss
 from src.pit_criterion import cal_loss, SISNR
 from src.dataset import wsj0, wsj0_eval
+from src.wham import wham, wham_eval
 from src.ranger import Ranger
 from src.dashboard import Dashboard
 from src.pimt_utils import PITMSELoss
@@ -146,6 +147,9 @@ class Trainer(Solver):
     def load_dset(self, dset, seg_len):
         # root: wsj0_root, vctk_root, libri_root
         d = 'wsj' if dset == 'wsj0' else dset # stupid error
+        if 'wham' in dset:
+            return self.load_wham(dset, seg_len)
+
         audio_root = self.config['data'][f'{d}_root']
         tr_list = f'./data/{dset}/id_list/tr.pkl'
         cv_list = f'./data/{dset}/id_list/cv.pkl'
@@ -166,6 +170,37 @@ class Trainer(Solver):
         devset = wsj0_eval(cv_list,
                 audio_root = audio_root,
                 pre_load = False)
+        cv_loader = DataLoader(devset,
+                batch_size = self.batch_size,
+                shuffle = False,
+                num_workers = self.num_workers)
+        return tr_loader, cv_loader
+
+    def load_wham(self, dset, seg_len):
+        audio_root = self.config['data'][f'wsj_root']
+        tr_list = f'./data/wsj0/id_list/tr.pkl'
+        cv_list = f'./data/wsj0/id_list/cv.pkl'
+
+        scale = read_scale(f'./data/{dset}')
+        print(f'Load wham data with scale {scale}')
+
+        trainset = wham(tr_list,
+                audio_root = audio_root,
+                seg_len = seg_len,
+                pre_load = False,
+                one_chunk_in_utt = True,
+                mode = 'tr',
+                scale = scale)
+        tr_loader = DataLoader(trainset,
+                batch_size = self.batch_size,
+                shuffle = True,
+                num_workers = self.num_workers)
+
+        devset = wham_eval(cv_list,
+                audio_root = audio_root,
+                pre_load = False,
+                mode = 'cv',
+                scale = scale)
         cv_loader = DataLoader(devset,
                 batch_size = self.batch_size,
                 shuffle = False,
