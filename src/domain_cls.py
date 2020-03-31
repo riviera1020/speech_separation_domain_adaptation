@@ -57,8 +57,31 @@ class Conv2dClassifier(nn.Module):
     def __init__(self, B, config):
         super(Conv2dClassifier, self).__init__()
         self.B = B
+        norm_type = config['norm_type']
+        layers = config['layers']
+
+        in_channel = B
+        network = []
+        for l, lconf in enumerate(layers):
+            out_channel = lconf['filters']
+            kernel = lconf['kernel']
+            stride = lconf['stride']
+            padding = lconf.get('padding', 0)
+            layer = nn.Conv2d(in_channel, out_channel,
+                    kernel_size = kernel,
+                    stride = stride,
+                    padding = padding)
+
+            layer = apply_norm(layer, norm_type)
+            network.append(layer)
+            if l != len(layers) - 1:
+                network.append(nn.LeakyReLU(0.1))
+            in_channel = out_channel
+
+        self.network = nn.Sequential(*network)
     def forward(self, x):
-        pass
+        x = self.network(x)
+        return x
 
 class DomainClassifier(nn.Module):
     def __init__(self, B, config):
@@ -112,7 +135,7 @@ class DomainClassifier(nn.Module):
                 out_channel = lconf['filters']
                 kernel = lconf['kernel']
                 stride = lconf['stride']
-                padding = 0
+                padding = lconf.get('padding', 0)
 
                 layer = nn.Conv1d(in_channel, out_channel,
                         kernel_size = kernel,
@@ -127,6 +150,9 @@ class DomainClassifier(nn.Module):
 
             self.network = nn.Sequential(*network)
 
+        elif mtype == 'conv2d-patch':
+            self.network = Conv2dClassifier(B, config)
+
         elif mtype == 'LSTM':
             in_channel = B
             self.network = LSTMClassifer(B, config)
@@ -139,6 +165,5 @@ class DomainClassifier(nn.Module):
                 nn.init.xavier_normal_(p)
 
     def forward(self, feature):
-
         x = self.network(feature)
         return x
