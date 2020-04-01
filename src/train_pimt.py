@@ -25,6 +25,7 @@ from src.wham import wham, wham_eval
 from src.ranger import Ranger
 from src.dashboard import Dashboard
 from src.pimt_utils import PITMSELoss
+from src.scheduler import RampScheduler, ConstantScheduler, DANNScheduler
 
 """
 from src.scheduler import FlatCosineLR, CosineWarmupLR
@@ -85,8 +86,9 @@ class Trainer(Solver):
         self.pi_conf = config['solver'].get('pi', {'use': False})
         self.mt_conf = config['solver'].get('mt', {'use': False})
         self.mbt_conf = config['solver'].get('mbt', {'use': False})
-        if self.pi_conf['use'] == self.mt_conf['use'] == self.mbt_conf['use']:
-            print('Specify to only use pi or mt algo')
+        self.pl_conf = config['solver'].get('pl', {'use': False})
+        if self.pi_conf['use'] == self.mt_conf['use'] == self.mbt_conf['use'] == self.pl_conf['use']:
+            print('Specify to only use one algo')
             exit()
         elif self.pi_conf['use']:
             self.algo = 'pi'
@@ -106,6 +108,9 @@ class Trainer(Solver):
             self.use_teacher = True
             self.ema_alpha = self.mbt_conf['ema_alpha']
             self.sampler = torch.distributions.uniform.Uniform(low=-2.5, high=2.5)
+        elif self.pl_conf['use']:
+            self.algo = 'pl'
+            self.lambda_scheduler = self.set_scheduler(self.pl_conf['scheduler'])
 
         self.locs = config['solver']['locs']
         if len(self.locs) == 0:
@@ -126,6 +131,15 @@ class Trainer(Solver):
 
     def set_transform(self, t_conf):
         self.transform = InputTransform(t_conf)
+
+    def set_scheduler(self, sch_config):
+        if sch_config['function'] == 'ramp':
+            return RampScheduler(sch_config['start_step'],
+                                 sch_config['end_step'],
+                                 sch_config['start_value'],
+                                 sch_config['end_value'])
+        elif sch_config['function'] == 'constant':
+            return ConstantScheduler(sch_config['value'])
 
     def convert_fp16(self):
         if self.fp16:
@@ -336,6 +350,8 @@ class Trainer(Solver):
                 self.train_mt(epoch, self.sup_tr_loader, self.uns_tr_gen)
             elif self.algo == 'mbt':
                 self.train_mbt(epoch, self.sup_tr_loader, self.uns_tr_gen)
+            elif self.algo == 'pl':
+                self.train_pseudo_label(epoch, self.sup_tr_loader, self.uns_tr_gen)
 
             if not self.use_teacher:
                 ## Valid training dataset
@@ -516,6 +532,67 @@ class Trainer(Solver):
         total_mixup = total_mixup / len(sup_loader)
         self.writer.add_scalar('train/epoch_loss', total_loss, epoch)
         self.writer.add_scalar('train/epoch_mixup_loss', total_mixup, epoch)
+
+    def train_pseudo_label(self, epoch, sup_loader, uns_gen):
+        self.model.train()
+        total_loss = 0.
+        total_uns_loss = 0.
+        cnt = 0
+
+        for i, sample in enumerate(tqdm(sup_loader, ncols = NCOL)):
+            self.opt.zero_grad()
+
+            # sup part
+            padded_mixture = sample['mix'].to(DEV)
+            padded_source = sample['ref'].to(DEV)
+            mixture_lengths = sample['ilens'].to(DEV)
+            B = padded_mixture.size(0)
+
+            padded_mixture = torch.ones(padded_mixture.size()).float().cuda()
+            padded_source = torch.ones(padded_source.size()).float().cuda()
+
+            estimate_source = self.model(padded_mixture)
+
+            sup_loss, max_snr, estimate_source, reorder_estimate_source = \
+                cal_loss(padded_source, estimate_source, mixture_lengths)
+
+            # pi on uns
+            uns_sample = uns_gen.__next__()
+            padded_mixture = uns_sample['mix'].to(DEV)
+            mixture_lengths = uns_sample['ilens'].to(DEV)
+
+            with torch.no_grad():
+                pseudo_ref = self.model.K_forward(padded_mixture, K = 2, T = 0.5)
+
+            estimate_source = self.model(padded_mixture)
+
+            uns_loss, max_snr, estimate_source, reorder_estimate_source = \
+                cal_loss(pseudo_ref, estimate_source, mixture_lengths)
+
+            l = self.lambda_scheduler.value(epoch)
+            loss = sup_loss + l * uns_loss
+            loss.backward()
+
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+            self.opt.step()
+
+            meta = { 'iter_loss': sup_loss.item(),
+                     'iter_uns_loss': uns_loss.item() }
+            self.writer.log_step_info('train', meta)
+
+            total_loss += sup_loss.item() * B
+            total_uns_loss += uns_loss.item() * B
+            cnt += B
+
+            self.step += 1
+            self.writer.step()
+
+        total_loss = total_loss / cnt
+        total_uns_loss = total_uns_loss / cnt
+
+        meta = { 'epoch_loss': total_loss,
+                 'epoch_uns_loss': total_uns_loss }
+        self.writer.log_epoch_info('train', meta)
 
     def valid(self, loader, epoch, no_save = False, prefix = ""):
         self.model.eval()

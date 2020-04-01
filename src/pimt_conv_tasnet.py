@@ -180,6 +180,40 @@ class PiMtConvTasNet(ConvTasNet):
         est_source_noise = F.pad(est_source_noise, (0, T_origin - T_conv))
         return est_source_noise
 
+    def K_forward(self, mixture, transform = None, K = 2, T = 0.1):
+        """
+        for pseudo labeling, should be call under torch.no_grad()
+        noise: dropout, addnoise, specaugm
+        """
+        clean_mixture_w = self.encoder(mixture)
+
+        mask = None
+        for k in range(K):
+            if transform is None:
+                est_mask, _ = self.separator(clean_mixture_w)
+            else:
+                if transform.where == 'wav':
+                    mixture = transform(mixture)
+                    mixture_w = self.encoder(mixture)
+                elif transform.where == 'spec':
+                    mixture_w = transform(clean_mixture_w)
+                est_mask, _ = self.separator(mixture_w)
+            if mask is None:
+                mask = est_mask
+            else:
+                mask  = mask + est_mask
+
+        est_mask = mask / K
+        if T != 1:
+            est_mask = est_mask ** (1/T)
+            est_mask = est_mask / est_mask.sum(dim = 1, keepdim = True)
+
+        est_source = self.decoder(clean_mixture_w, est_mask)
+        T_origin = mixture.size(-1)
+        T_conv = est_source .size(-1)
+        est_source = F.pad(est_source, (0, T_origin - T_conv))
+        return est_source
+
     def fetch_forward(self, mixture, locs, transform = None):
         """
         loc: a, a|b, a|b|c, mask

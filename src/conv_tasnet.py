@@ -83,6 +83,9 @@ class Encoder(nn.Module):
         # 50% overlap
         self.conv1d_U = nn.Conv1d(1, N, kernel_size=L, stride=L // 2, bias=False)
 
+    def cal_lengths(self, mixture_lengths):
+        return (2 * mixture_lengths // self.L) - 1
+
     def forward(self, mixture):
         """
         Args:
@@ -201,11 +204,9 @@ class TemporalBlock(nn.Module):
                                         stride, padding, dilation, norm_type,
                                         causal)
 
-        if dropout > 0.0:
-            d = nn.Dropout(dropout)
-            self.net = nn.Sequential(conv1x1, prelu, norm, d, dsconv)
-        else:
-            self.net = nn.Sequential(conv1x1, prelu, norm, dsconv)
+        self.drop_loc = 3
+        self.dropout = dropout
+        self.net = nn.Sequential(conv1x1, prelu, norm, dsconv)
 
     def forward(self, x):
         """
@@ -215,9 +216,11 @@ class TemporalBlock(nn.Module):
             [M, B, K]
         """
         residual = x
-        out = self.net(x)
-        # TODO: when P = 3 here works fine, but when P = 2 maybe need to pad?
-        return out + residual  # look like w/o F.relu is better than w/ F.relu
+        for i, layer in enumerate(self.net):
+            if i == self.drop_loc and self.dropout > 0:
+                x = F.dropout(x, p=self.dropout)
+            x = layer(x)
+        return x + residual
 
 class DepthwiseSeparableConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size,
@@ -322,10 +325,11 @@ class GlobalLayerNorm(nn.Module):
         self.gamma.data.fill_(1)
         self.beta.data.zero_()
 
-    def forward(self, y):
+    def forward(self, y, ylens = None):
         """
         Args:
             y: [M, N, K], M is batch size, N is channel size, K is length
+            ylens: [M]
         Returns:
             gLN_y: [M, N, K]
         """
