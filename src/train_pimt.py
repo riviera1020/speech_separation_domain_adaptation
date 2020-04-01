@@ -4,6 +4,7 @@ import time
 import yaml
 import copy
 import math
+import random
 import datetime
 import numpy as np
 
@@ -80,10 +81,11 @@ class Trainer(Solver):
         self.grad_clip = config['solver']['grad_clip']
         self.num_workers = config['solver']['num_workers']
 
+        self.use_teacher = False
         self.pi_conf = config['solver'].get('pi', {'use': False})
         self.mt_conf = config['solver'].get('mt', {'use': False})
         self.mbt_conf = config['solver'].get('mbt', {'use': False})
-        if self.pi_conf['use'] == self.mt_conf['use']:
+        if self.pi_conf['use'] == self.mt_conf['use'] == self.mbt_conf['use']:
             print('Specify to only use pi or mt algo')
             exit()
         elif self.pi_conf['use']:
@@ -94,11 +96,16 @@ class Trainer(Solver):
             self.uns_init_w = self.pi_conf.get('uns_init_w', 0.)
             self.sup_pi_lambda = self.pi_conf['sup_lambda']
             self.uns_pi_lambda = self.pi_conf['uns_lambda']
+            self.con_loss = ConsistencyLoss(self.loss_type)
         elif self.mt_conf['use']:
             self.algo = 'mt'
+            self.use_teacher = True
             self.mt_lambda = self.mt_conf['lambda']
-
-        self.con_loss = ConsistencyLoss(self.loss_type)
+        elif self.mbt_conf['use']:
+            self.algo = 'mbt'
+            self.use_teacher = True
+            self.ema_alpha = self.mbt_conf['ema_alpha']
+            self.sampler = torch.distributions.uniform.Uniform(low=-2.5, high=2.5)
 
         self.locs = config['solver']['locs']
         if len(self.locs) == 0:
@@ -211,9 +218,13 @@ class Trainer(Solver):
         self.model = PiMtConvTasNet(self.config['model'])
         self.model = self.model.to(DEV)
 
-        if self.algo == 'mt':
-            # TODO gen teacher model
-            pass
+        if self.use_teacher:
+            self.teacher = PiMtConvTasNet(self.config['model'])
+            self.teacher = self.teacher.to(DEV)
+            for param, tparam in zip(self.model.parameters(), self.teacher.parameters()):
+                tparam.data.copy_(param.data)
+            for tparam in self.teacher.parameters():
+                tparam.detach_()
 
         # TODO, get optim_dict from pretrained and resume
         # maybe buggy
@@ -322,13 +333,19 @@ class Trainer(Solver):
             if self.algo == 'pi':
                 self.train_pi_model(epoch, self.sup_tr_loader, self.uns_tr_gen)
             elif self.algo == 'mt':
-                self.train_mt(epoch, self.sup_tr_loader, self.uns_tr_gne)
+                self.train_mt(epoch, self.sup_tr_loader, self.uns_tr_gen)
+            elif self.algo == 'mbt':
+                self.train_mbt(epoch, self.sup_tr_loader, self.uns_tr_gen)
 
-            ## Valid training dataset
-            self.valid(self.sup_cv_loader, epoch, prefix = self.sup_dset)
+            if not self.use_teacher:
+                ## Valid training dataset
+                self.valid(self.sup_cv_loader, epoch, prefix = self.sup_dset)
 
-            # Valid not training dataset
-            self.valid(self.uns_cv_loader, epoch, no_save = True, prefix = self.uns_dset)
+                # Valid not training dataset
+                self.valid(self.uns_cv_loader, epoch, no_save = True, prefix = self.uns_dset)
+            else:
+                self.ts_valid(self.sup_cv_loader, epoch, prefix = self.sup_dset)
+                self.ts_valid(self.uns_cv_loader, epoch, no_save = True, prefix = self.uns_dset)
 
             self.writer.epoch()
 
@@ -430,65 +447,14 @@ class Trainer(Solver):
         self.writer.log_epoch_info('train', meta)
 
     def train_mt(self, epoch, sup_loader, uns_gen):
-        self.model.train()
-        total_loss = 0.
-        total_mixup = 0.
-
-        for i, sample in enumerate(tqdm(sup_loader, ncols = NCOL)):
-
-            # sup part
-            padded_mixture = sample['mix'].to(DEV)
-            padded_source = sample['ref'].to(DEV)
-            mixture_lengths = sample['ilens'].to(DEV)
-
-            estimate_source = self.model(padded_mixture)
-
-            sup_loss, max_snr, estimate_source, reorder_estimate_source = \
-                cal_loss(padded_source, estimate_source, mixture_lengths)
-
-            uns_sample = uns_gen.__next__()
-            padded_mixture = uns_sample['mix'].to(DEV)
-            mixture_lengths = sample['ilens'].to(DEV)
-
-            with torch.no_grad():
-                teacher_out = self.ema_model(padded_mixture)
-                s1 = teacher_out[:, 0, :]
-                s2 = teacher_out[:, 1, :]
-
-                mlambda = self.beta_sampler.sample((s1.size(0),1)).to(DEV)
-                teacher_mix = mlambda * s1 + (1-mlambda) * s2
-
-            student_out = self.model(teacher_mix)
-            mixup_loss, max_snr, estimate_source, reorder_estimate_source = \
-                cal_loss(teacher_out, student_out, mixture_lengths)
-
-            r = np.exp(float(epoch+1)/self.epochs - 1)
-            loss = sup_loss + r * mixup_loss
-
-            # SGD update
-            self.opt.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-            self.opt.step()
-            self.writer.add_scalar('train/iter_loss', sup_loss.item(), self.step)
-
-            # EMA update
-            self.update_ema(self.model, self.ema_model, self.ema_alpha, self.step)
-
-            total_loss += sup_loss.item()
-            total_mixup += mixup_loss.item()
-
-            self.step += 1
-
-        total_loss = total_loss / len(sup_loader)
-        total_mixup = total_mixup / len(sup_loader)
-        self.writer.add_scalar('train/epoch_loss', total_loss, epoch)
-        self.writer.add_scalar('train/epoch_mixup_loss', total_mixup, epoch)
+        pass
 
     def train_mbt(self, epoch, sup_loader, uns_gen):
         self.model.train()
         total_loss = 0.
         total_mixup = 0.
+        total_uns_loss = 0.
+        total_uns_teacher_loss = 0.
 
         for i, sample in enumerate(tqdm(sup_loader, ncols = NCOL)):
 
@@ -504,15 +470,18 @@ class Trainer(Solver):
             # mixup training
             uns_sample = uns_gen.__next__()
             padded_mixture = uns_sample['mix'].to(DEV)
+            padded_source = uns_sample['ref'].to(DEV)
             mixture_lengths = sample['ilens'].to(DEV)
 
             with torch.no_grad():
-                teacher_out = self.ema_model(padded_mixture)
+                teacher_out = self.teacher(padded_mixture)
                 s1 = teacher_out[:, 0, :]
                 s2 = teacher_out[:, 1, :]
 
-                mlambda = self.beta_sampler.sample((s1.size(0),1)).to(DEV)
-                teacher_mix = mlambda * s1 + (1-mlambda) * s2
+                mlambda = self.sampler.sample((s1.size(0),1)).to(DEV)
+                l1 = 10 ** (mlambda / 20)
+                l2 = 10 ** (-mlambda / 20)
+                teacher_mix = l1 * s1 + l2 * s2
 
             student_out = self.model(teacher_mix)
             mixup_loss, max_snr, estimate_source, reorder_estimate_source = \
@@ -526,21 +495,27 @@ class Trainer(Solver):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
             self.opt.step()
-            self.writer.add_scalar('train/iter_loss', sup_loss.item(), self.step)
+            meta = { 'iter_loss': sup_loss.item(),
+                     'iter_mixup': mixup_loss.item() }
+            self.writer.log_step_info('train', meta)
 
             # EMA update
-            self.update_ema(self.model, self.ema_model, self.ema_alpha, self.step)
+            self.update_ema(self.model, self.teacher, self.ema_alpha, self.step)
 
-            total_loss += sup_loss.item()
-            total_mixup += mixup_loss.item()
+            # TODO, esimate uns loss while training?
+            # with torch.no_grad():
+            # ...
+            B = padded_mixture.size(0)
+            total_loss += sup_loss.item() * B
+            total_mixup += mixup_loss.item() * B
 
             self.step += 1
+            self.writer.step()
 
         total_loss = total_loss / len(sup_loader)
         total_mixup = total_mixup / len(sup_loader)
         self.writer.add_scalar('train/epoch_loss', total_loss, epoch)
         self.writer.add_scalar('train/epoch_mixup_loss', total_mixup, epoch)
-
 
     def valid(self, loader, epoch, no_save = False, prefix = ""):
         self.model.eval()
@@ -589,6 +564,86 @@ class Trainer(Solver):
         model_name = f'{epoch}.pth'
         info_dict = { 'epoch': epoch, 'step': self.step, 'valid_score': valid_score, 'config': self.config }
         info_dict['optim'] = self.opt.state_dict()
+        if self.fp16:
+            info_dict['amp'] = amp.state_dict()
+
+        self.saver.update(self.model, total_sisnri, model_name, info_dict)
+
+        model_name = 'latest.pth'
+        self.saver.force_save(self.model, model_name, info_dict)
+
+        if self.use_scheduler:
+            if self.scheduler_type == 'ReduceLROnPlateau':
+                self.lr_scheduler.step(total_loss)
+            #elif self.scheduler_type in [ 'FlatCosine', 'CosineWarmup' ]:
+            #    self.lr_scheduler.step(epoch)
+
+    def ts_valid(self, loader, epoch, no_save = False, prefix = ""):
+        # valid both teacher and student
+        self.model.eval()
+        total_loss = 0.
+        total_sisnri = 0.
+        total_teacher_loss = 0.
+        total_teacher_sisnri = 0.
+        cnt = 0
+
+        with torch.no_grad():
+            for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
+
+                padded_mixture = sample['mix'].to(DEV)
+                padded_source = sample['ref'].to(DEV)
+                mixture_lengths = sample['ilens'].to(DEV)
+                B = padded_mixture.size(0)
+
+                ml = mixture_lengths.max().item()
+                padded_mixture = padded_mixture[:, :ml]
+                padded_source = padded_source[:, :, :ml]
+
+                estimate_source = self.model(padded_mixture)
+
+                loss, max_snr, estimate_source, reorder_estimate_source = \
+                    cal_loss(padded_source, estimate_source, mixture_lengths)
+
+                mix_sisnr = SISNR(padded_source, padded_mixture, mixture_lengths)
+                max_sisnri = (max_snr - mix_sisnr)
+
+                total_loss += loss.item() * B
+                total_sisnri += max_sisnri.sum().item()
+                cnt += B
+
+                estimate_source = self.teacher(padded_mixture)
+
+                loss, max_snr, estimate_source, reorder_estimate_source = \
+                    cal_loss(padded_source, estimate_source, mixture_lengths)
+
+                max_sisnri = (max_snr - mix_sisnr)
+
+                total_teacher_loss += loss.item() * B
+                total_teacher_sisnri += max_sisnri.sum().item()
+
+        total_loss = total_loss / cnt
+        total_sisnri = total_sisnri / cnt
+        total_teacher_loss = total_teacher_loss / cnt
+        total_teacher_sisnri = total_teacher_sisnri / cnt
+
+        meta = { f'{prefix}_epoch_loss': total_loss,
+                 f'{prefix}_epoch_sisnri': total_sisnri,
+                 f'{prefix}_epoch_teacher_loss': total_teacher_loss,
+                 f'{prefix}_epoch_teacher_sisnri': total_teacher_sisnri }
+        self.writer.log_epoch_info('valid', meta)
+
+        valid_score = {}
+        valid_score['valid_loss'] = total_loss
+        valid_score['valid_sisnri'] = total_sisnri
+        valid_score['valid_teacher_loss'] = total_teacher_loss
+        valid_score['valid_teacher_sisnri'] = total_teacher_sisnri
+
+        if no_save:
+            return
+
+        model_name = f'{epoch}.pth'
+        info_dict = { 'epoch': epoch, 'step': self.step, 'valid_score': valid_score, 'config': self.config,
+                      'optim': self.opt.state_dict(), 'teacher': self.teacher.state_dict() }
         if self.fp16:
             info_dict['amp'] = amp.state_dict()
 
