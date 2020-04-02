@@ -77,6 +77,7 @@ class Trainer(Solver):
         self.batch_size = config['solver']['batch_size']
         self.grad_clip = config['solver']['grad_clip']
         self.num_workers = config['solver']['num_workers']
+        self.save_freq = config['solver'].get('save_freq', 0)
 
         self.step = 0
         self.valid_times = 0
@@ -261,7 +262,11 @@ class Trainer(Solver):
             self.train_one_epoch(epoch, self.dsets[self.dset]['tr'])
 
             # Valid training dataset
-            self.valid(self.dsets[self.dset]['cv'], epoch, prefix = self.dset)
+            if self.save_freq > 0 and (epoch + 1) % self.save_freq == 0:
+                force_save = True
+            else:
+                force_save = False
+            self.valid(self.dsets[self.dset]['cv'], epoch, prefix = self.dset, force_save = force_save)
 
             # Valid not training dataset
             for dset in self.dsets:
@@ -312,7 +317,7 @@ class Trainer(Solver):
                  'epoch_sisnri': total_sisnri }
         self.writer.log_epoch_info('train', meta)
 
-    def valid(self, loader, epoch, no_save = False, prefix = ""):
+    def valid(self, loader, epoch, no_save = False, prefix = "", force_save = False):
         self.model.eval()
         total_loss = 0.
         total_sisnri = 0.
@@ -361,6 +366,9 @@ class Trainer(Solver):
         info_dict['optim'] = self.opt.state_dict()
 
         self.saver.update(self.model, total_sisnri, model_name, info_dict)
+
+        if force_save:
+            self.saver.force_save(self.model, model_name, info_dict)
 
         model_name = 'latest.pth'
         self.saver.force_save(self.model, model_name, info_dict)
