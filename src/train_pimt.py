@@ -471,6 +471,7 @@ class Trainer(Solver):
         total_mixup = 0.
         total_uns_loss = 0.
         total_uns_teacher_loss = 0.
+        cnt = 0
 
         for i, sample in enumerate(tqdm(sup_loader, ncols = NCOL)):
 
@@ -487,7 +488,7 @@ class Trainer(Solver):
             uns_sample = uns_gen.__next__()
             padded_mixture = uns_sample['mix'].to(DEV)
             padded_source = uns_sample['ref'].to(DEV)
-            mixture_lengths = sample['ilens'].to(DEV)
+            mixture_lengths = uns_sample['ilens'].to(DEV)
 
             with torch.no_grad():
                 teacher_out = self.teacher(padded_mixture)
@@ -524,17 +525,82 @@ class Trainer(Solver):
             B = padded_mixture.size(0)
             total_loss += sup_loss.item() * B
             total_mixup += mixup_loss.item() * B
+            cnt += B
 
             self.step += 1
             self.writer.step()
 
-        total_loss = total_loss / len(sup_loader)
-        total_mixup = total_mixup / len(sup_loader)
-        self.writer.add_scalar('train/epoch_loss', total_loss, epoch)
-        self.writer.add_scalar('train/epoch_mixup_loss', total_mixup, epoch)
+        total_loss = total_loss / cnt
+        total_mixup = total_mixup / cnt
+
+        meta = { 'epoch_loss': total_loss,
+                 'epoch_mixup_loss': total_mixup }
+        self.writer.log_epoch_info('train', meta)
 
     def train_pseudo_label(self, epoch, sup_loader, uns_gen):
         self.model.train()
+        total_loss = 0.
+        total_uns_loss = 0.
+        cnt = 0
+
+        for i, sample in enumerate(tqdm(sup_loader, ncols = NCOL)):
+            self.opt.zero_grad()
+
+            # sup part
+            padded_mixture = sample['mix'].to(DEV)
+            padded_source = sample['ref'].to(DEV)
+            mixture_lengths = sample['ilens'].to(DEV)
+            B = padded_mixture.size(0)
+
+            padded_mixture = torch.ones(padded_mixture.size()).float().cuda()
+            padded_source = torch.ones(padded_source.size()).float().cuda()
+
+            estimate_source = self.model(padded_mixture)
+
+            sup_loss, max_snr, estimate_source, reorder_estimate_source = \
+                cal_loss(padded_source, estimate_source, mixture_lengths)
+
+            # pi on uns
+            uns_sample = uns_gen.__next__()
+            padded_mixture = uns_sample['mix'].to(DEV)
+            mixture_lengths = uns_sample['ilens'].to(DEV)
+
+            with torch.no_grad():
+                pseudo_ref = self.model.K_forward(padded_mixture, K = 2, T = 0.5)
+
+            estimate_source = self.model(padded_mixture)
+
+            uns_loss, max_snr, estimate_source, reorder_estimate_source = \
+                cal_loss(pseudo_ref, estimate_source, mixture_lengths)
+
+            l = self.lambda_scheduler.value(epoch)
+            loss = sup_loss + l * uns_loss
+            loss.backward()
+
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+            self.opt.step()
+
+            meta = { 'iter_loss': sup_loss.item(),
+                     'iter_uns_loss': uns_loss.item() }
+            self.writer.log_step_info('train', meta)
+
+            total_loss += sup_loss.item() * B
+            total_uns_loss += uns_loss.item() * B
+            cnt += B
+
+            self.step += 1
+            self.writer.step()
+
+        total_loss = total_loss / cnt
+        total_uns_loss = total_uns_loss / cnt
+
+        meta = { 'epoch_loss': total_loss,
+                 'epoch_uns_loss': total_uns_loss }
+        self.writer.log_epoch_info('train', meta)
+
+    def train_noisy_student(self, epoch, sup_loader, uns_gen):
+        self.model.train()
+        self.teacher.eval()
         total_loss = 0.
         total_uns_loss = 0.
         cnt = 0
