@@ -365,7 +365,7 @@ class Trainer(Solver):
                 padded_source = padded_source[:, :, :ml]
                 B = padded_source.size(0)
 
-                estimate_source = self.model(padded_mixture)
+                estimate_source, _ = self.model(padded_mixture)
 
                 loss, max_snr, estimate_source, reorder_estimate_source = \
                     cal_loss(padded_source, estimate_source, mixture_lengths)
