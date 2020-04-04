@@ -232,7 +232,7 @@ class Trainer(Solver):
 
     def set_teacher(self):
         tpath = self.config['solver'].get('pretrained_teacher', '')
-        tconf = self.config['solver'].get('teacher_confing', '')
+        tconf = self.config['solver'].get('teacher_config', '')
         if tpath != '' and tconf != '':
             print('Load pretrained model as teacher')
             tconf = yaml.load(open(tconf), Loader=yaml.FullLoader)
@@ -246,8 +246,8 @@ class Trainer(Solver):
             self.teacher = self.teacher.to(DEV)
             for param, tparam in zip(self.model.parameters(), self.teacher.parameters()):
                 tparam.data.copy_(param.data)
-            for tparam in self.teacher.parameters():
-                tparam.detach_()
+        for tparam in self.teacher.parameters():
+            tparam.detach_()
 
     def set_model(self):
         self.model = PiMtConvTasNet(self.config['model'])
@@ -621,7 +621,6 @@ class Trainer(Solver):
         cnt = 0
 
         for i, sample in enumerate(tqdm(sup_loader, ncols = NCOL)):
-            self.opt.zero_grad()
 
             # sup part
             padded_mixture = sample['mix'].to(DEV)
@@ -649,6 +648,7 @@ class Trainer(Solver):
 
             l = self.lambda_scheduler.value(epoch)
             loss = sup_loss + l * uns_loss
+            self.opt.zero_grad()
             loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
