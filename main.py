@@ -62,20 +62,9 @@ if __name__ == '__main__':
         else:
             pass
     elif mode == 'dagan':
-        if not args.test:
-            from src.train_dagan import Trainer as Solver
-        else:
-            pass
-    elif mode == 'mixup':
-        if not args.test:
-            from src.train_mixup import Trainer as Solver
-        else:
-            pass
-    elif mode == 'vat':
-        if not args.test:
-            from src.train_vat import Trainer as Solver
-        else:
-            pass
+        from src.train_dagan import Trainer as Solver
+    elif mode == 'mmd':
+        from src.train_mmd import Trainer as Solver
     elif mode == 'pimt':
         from src.train_pimt import Trainer as Solver
     elif mode == 'debug':
