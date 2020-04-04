@@ -87,7 +87,8 @@ class Trainer(Solver):
         self.mt_conf = config['solver'].get('mt', {'use': False})
         self.mbt_conf = config['solver'].get('mbt', {'use': False})
         self.pl_conf = config['solver'].get('pl', {'use': False})
-        if self.pi_conf['use'] == self.mt_conf['use'] == self.mbt_conf['use'] == self.pl_conf['use']:
+        self.ns_conf = config['solver'].get('ns', {'use': False})
+        if self.pi_conf['use'] == self.mt_conf['use'] == self.mbt_conf['use'] == self.pl_conf['use'] == self.ns_conf['use']:
             print('Specify to only use one algo')
             exit()
         elif self.pi_conf['use']:
@@ -99,6 +100,7 @@ class Trainer(Solver):
             self.sup_pi_lambda = self.pi_conf['sup_lambda']
             self.uns_pi_lambda = self.pi_conf['uns_lambda']
             self.con_loss = ConsistencyLoss(self.loss_type)
+            self.locs = config['solver'].get('locs', [])
         elif self.mt_conf['use']:
             self.algo = 'mt'
             self.use_teacher = True
@@ -111,14 +113,14 @@ class Trainer(Solver):
         elif self.pl_conf['use']:
             self.algo = 'pl'
             self.lambda_scheduler = self.set_scheduler(self.pl_conf['scheduler'])
+        elif self.ns_conf['use']:
+            self.algo = 'ns'
+            self.use_teacher = True
+            self.lambda_scheduler = self.set_scheduler(self.ns_conf['scheduler'])
 
-        self.locs = config['solver']['locs']
-        if len(self.locs) == 0:
-            print('Please Specify which location of feat to cal loss')
-            exit()
-
-        input_transform = config['solver']['input_transform']
-        self.set_transform(input_transform)
+        input_transform = config['solver'].get('input_transform', None)
+        if input_transform != None:
+            self.set_transform(input_transform)
 
         self.step = 0
         self.valid_times = 0
@@ -228,17 +230,31 @@ class Trainer(Solver):
                 num_workers = self.num_workers)
         return tr_loader, cv_loader
 
-    def set_model(self):
-        self.model = PiMtConvTasNet(self.config['model'])
-        self.model = self.model.to(DEV)
-
-        if self.use_teacher:
+    def set_teacher(self):
+        tpath = self.config['solver'].get('pretrained_teacher', '')
+        tconf = self.config['solver'].get('teacher_confing', '')
+        if tpath != '' and tconf != '':
+            print('Load pretrained model as teacher')
+            tconf = yaml.load(open(tconf), Loader=yaml.FullLoader)
+            self.teacher = PiMtConvTasNet(tconf['model'])
+            info = torch.load(tpath)
+            self.teacher.load_state_dict(info['state_dict'])
+            self.teacher = self.teacher.to(DEV)
+        else:
+            print('Init new model as teacher')
             self.teacher = PiMtConvTasNet(self.config['model'])
             self.teacher = self.teacher.to(DEV)
             for param, tparam in zip(self.model.parameters(), self.teacher.parameters()):
                 tparam.data.copy_(param.data)
             for tparam in self.teacher.parameters():
                 tparam.detach_()
+
+    def set_model(self):
+        self.model = PiMtConvTasNet(self.config['model'])
+        self.model = self.model.to(DEV)
+
+        if self.use_teacher:
+            self.set_teacher()
 
         # TODO, get optim_dict from pretrained and resume
         # maybe buggy
@@ -352,6 +368,8 @@ class Trainer(Solver):
                 self.train_mbt(epoch, self.sup_tr_loader, self.uns_tr_gen)
             elif self.algo == 'pl':
                 self.train_pseudo_label(epoch, self.sup_tr_loader, self.uns_tr_gen)
+            elif self.algo == 'ns':
+                self.train_noisy_student(epoch, self.sup_tr_loader, self.uns_tr_gen)
 
             if not self.use_teacher:
                 ## Valid training dataset
@@ -552,9 +570,6 @@ class Trainer(Solver):
             mixture_lengths = sample['ilens'].to(DEV)
             B = padded_mixture.size(0)
 
-            padded_mixture = torch.ones(padded_mixture.size()).float().cuda()
-            padded_source = torch.ones(padded_source.size()).float().cuda()
-
             estimate_source = self.model(padded_mixture)
 
             sup_loss, max_snr, estimate_source, reorder_estimate_source = \
@@ -614,9 +629,6 @@ class Trainer(Solver):
             mixture_lengths = sample['ilens'].to(DEV)
             B = padded_mixture.size(0)
 
-            padded_mixture = torch.ones(padded_mixture.size()).float().cuda()
-            padded_source = torch.ones(padded_source.size()).float().cuda()
-
             estimate_source = self.model(padded_mixture)
 
             sup_loss, max_snr, estimate_source, reorder_estimate_source = \
@@ -628,7 +640,7 @@ class Trainer(Solver):
             mixture_lengths = uns_sample['ilens'].to(DEV)
 
             with torch.no_grad():
-                pseudo_ref = self.model.K_forward(padded_mixture, K = 2, T = 0.5)
+                pseudo_ref = self.teacher(padded_mixture)
 
             estimate_source = self.model(padded_mixture)
 
