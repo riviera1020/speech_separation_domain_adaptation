@@ -77,7 +77,7 @@ class Trainer(Solver):
         self.batch_size = config['solver']['batch_size']
         self.grad_clip = config['solver']['grad_clip']
         self.num_workers = config['solver']['num_workers']
-        self.save_freq = config['solver'].get('save_freq', 0)
+        self.save_freq = config['solver'].get('save_freq', -1)
 
         self.step = 0
         self.valid_times = 0
@@ -368,6 +368,7 @@ class Trainer(Solver):
         self.saver.update(self.model, total_sisnri, model_name, info_dict)
 
         if force_save:
+            model_name = f'{epoch}_force.pth'
             self.saver.force_save(self.model, model_name, info_dict)
 
         model_name = 'latest.pth'
