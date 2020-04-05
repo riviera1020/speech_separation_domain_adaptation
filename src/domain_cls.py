@@ -1,7 +1,13 @@
 import torch
 import torch.nn as nn
 from src.misc import apply_norm
-from src.conv_tasnet import TemporalConvNet
+from src.conv_tasnet import TemporalConvNet, GlobalLayerNorm
+
+acts = {
+    "hardtanh": nn.Hardtanh,
+    "relu": nn.ReLU,
+    "leaky_relu": nn.LeakyReLU,
+}
 
 class AvgLayer(nn.Module):
     def __init__(self):
@@ -53,12 +59,13 @@ class LSTMClassifer(nn.Module):
         x = self.out(x)
         return x
 
-class Conv2dClassifier(nn.Module):
+class ConvPatchClassifier(nn.Module):
     def __init__(self, B, config):
-        super(Conv2dClassifier, self).__init__()
+        super(ConvPatchClassifier, self).__init__()
         self.B = B
         norm_type = config['norm_type']
         layers = config['layers']
+        use_layernorm = config.get('layernorm', False)
 
         in_channel = B
         network = []
@@ -67,13 +74,18 @@ class Conv2dClassifier(nn.Module):
             kernel = lconf['kernel']
             stride = lconf['stride']
             padding = lconf.get('padding', 0)
-            layer = nn.Conv2d(in_channel, out_channel,
+            layer = nn.Conv1d(in_channel, out_channel,
                     kernel_size = kernel,
                     stride = stride,
                     padding = padding)
 
             layer = apply_norm(layer, norm_type)
             network.append(layer)
+
+            if use_layernorm and l != len(layers) - 1:
+                norm = GlobalLayerNorm(out_channel)
+                network.append(norm)
+
             if l != len(layers) - 1:
                 network.append(nn.LeakyReLU(0.1))
             in_channel = out_channel
@@ -90,16 +102,6 @@ class DomainClassifier(nn.Module):
         self.B = B
         mtype = config['type']
         self.mtype = mtype
-
-        acts = {
-            "hardtanh": nn.Hardtanh,
-            "relu": nn.ReLU,
-            "leaky_relu": nn.LeakyReLU,
-        }
-        act = acts[config['act']]
-        norm_type = config['norm_type']
-
-        layers = config['layers']
 
         if mtype == 'conv':
             in_channel = B
@@ -128,27 +130,7 @@ class DomainClassifier(nn.Module):
             self.network = nn.Sequential(*network)
 
         elif mtype == 'conv-patch':
-            in_channel = B
-            network = []
-
-            for l, lconf in enumerate(layers):
-                out_channel = lconf['filters']
-                kernel = lconf['kernel']
-                stride = lconf['stride']
-                padding = lconf.get('padding', 0)
-
-                layer = nn.Conv1d(in_channel, out_channel,
-                        kernel_size = kernel,
-                        stride = stride,
-                        padding = padding)
-
-                layer = apply_norm(layer, norm_type)
-                network.append(layer)
-                if l != len(layers) - 1:
-                    network.append(act())
-                in_channel = out_channel
-
-            self.network = nn.Sequential(*network)
+            self.network = ConvPatchClassifier(B, config)
 
         elif mtype == 'conv2d-patch':
             self.network = Conv2dClassifier(B, config)

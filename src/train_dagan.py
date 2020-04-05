@@ -352,7 +352,8 @@ class Trainer(Solver):
             loss, max_snr, estimate_source, reorder_estimate_source = \
                 cal_loss(padded_source, estimate_source, mixture_lengths)
 
-            self.g_optim.zero_grad()
+            self.D.zero_grad()
+            self.G.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.G.parameters(), self.G_grad_clip)
             self.g_optim.step()
@@ -465,7 +466,8 @@ class Trainer(Solver):
             total_d_loss += d_loss.item()
             weighted_d_loss += _d_loss.item()
 
-            self.d_optim.zero_grad()
+            self.D.zero_grad()
+            self.G.zero_grad()
             _d_loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(self.D.parameters(), self.D_grad_clip)
             if math.isnan(grad_norm):
@@ -476,15 +478,16 @@ class Trainer(Solver):
         total_d_loss /= self.d_iters
         weighted_d_loss /= self.d_iters
         total_gp /= self.d_iters
-        domain_acc = (src_domain_acc + tgt_domain_acc) / (src_cnt + tgt_cnt)
-        src_domain_acc /= src_cnt
-        tgt_domain_acc /= tgt_cnt
+        meta = { f'{prefix}d_loss': total_d_loss,
+                 f'{prefix}gradient_penalty': total_gp }
+        if self.adv_loss == 'gan':
+            domain_acc = (src_domain_acc + tgt_domain_acc) / (src_cnt + tgt_cnt)
+            src_domain_acc /= src_cnt
+            tgt_domain_acc /= tgt_cnt
+            meta[f'{prefix}dis_src_domain_acc'] = src_domain_acc
+            meta[f'{prefix}dis_tgt_domain_acc'] = tgt_domain_acc
+            meta[f'{prefix}dis_domain_acc'] = domain_acc
 
-        meta = { f'{prefix}dis_src_domain_acc': src_domain_acc,
-                 f'{prefix}dis_tgt_domain_acc': tgt_domain_acc,
-                 f'{prefix}d_loss': total_d_loss,
-                 f'{prefix}gradient_penalty': total_gp,
-                 f'{prefix}dis_domain_acc': domain_acc }
         self.writer.log_step_info('train', meta)
 
     def train_gen_once(self, step, src_gen, tgt_gen):
@@ -493,6 +496,8 @@ class Trainer(Solver):
         total_g_loss = 0.
         weighted_g_loss = 0.
         domain_acc = 0.
+        src_domain_acc = 0.
+        tgt_domain_acc = 0.
         cnt = 0
         for _ in range(self.g_iters):
 
@@ -534,7 +539,8 @@ class Trainer(Solver):
             g_lambda = self.Lg_scheduler.value(step)
             _g_loss = g_loss * g_lambda
 
-            self.g_optim.zero_grad()
+            self.D.zero_grad()
+            self.G.zero_grad()
             _g_loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(self.G.parameters(), self.G_grad_clip)
             if math.isnan(grad_norm):
