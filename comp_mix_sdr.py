@@ -11,6 +11,7 @@ from src.utils import read_scale, NCOL
 from src.dataset import wsj0_eval
 from src.wham import wham_eval
 from src.sep_utils import remove_pad
+from src.gender_mapper import GenderMapper
 
 def load_dset(audio_root, data_root, dset):
     if 'wham' not in dset:
@@ -79,11 +80,17 @@ def load_wham(audio_root, data_root):
             num_workers = num_workers)
     return cv_loader, tt_loader
 
-def comp_oneset(loader):
+def comp_oneset(loader, dset):
     result = {}
 
     total_sdr = 0
     total_cnt = 0
+
+    gs = [ 'MM', 'FF', 'MF' ]
+    gender_sdr = { g: 0. for g in gs }
+    gender_cnt = { g: 0 for g in gs }
+
+    g_mapper = GenderMapper()
 
     for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
         padded_mixture = sample['mix']
@@ -110,34 +117,51 @@ def comp_oneset(loader):
             uid = uids[b]
             result[uid] = sdr0
 
+            g = g_mapper(uid, dset)
+            gender_sdr[g] += sdr0
+            gender_cnt[g] += 1
+
     total_sdr /= total_cnt
+
+    for g in gender_sdr:
+        gender_sdr[g] = gender_sdr[g] / gender_cnt[g]
+
+    result['gender'] = gender_sdr
     return total_sdr, result
 
 def dump_result(total_sdr, result, out_dir, prefix, dump_all = False):
 
-    sdr_name = os.path.join(out_dir, prefix)
-    with open(sdr_name, 'w') as f:
-        f.write(str(total_sdr))
+    #sdr_name = os.path.join(out_dir, prefix)
+    #with open(sdr_name, 'w') as f:
+    #    f.write(str(total_sdr))
+
+    gender_sdr = result['gender']
+    for g, sdr0 in gender_sdr.items():
+        sdr_name = os.path.join(out_dir, f'{prefix}_{g}')
+        with open(sdr_name, 'w') as f:
+            f.write(str(sdr0))
 
     if dump_all:
         json_name = os.path.join(out_dir, f'{prefix}.json')
         json.dump(result, open(json_name, 'w'))
 
-def main(out_dir, cv_loader, tt_loader, dump_all = False):
+def main(dset, audio_root, data_root, dump_all = False):
 
-    total_sdr, result = comp_oneset(cv_loader)
+    out_dir = os.path.join(data_root, 'mix_sdr')
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    cv_loader, tt_loader = load_dset(audio_root, data_root, dset)
+
+    total_sdr, result = comp_oneset(cv_loader, dset)
     dump_result(total_sdr, result, out_dir, prefix = 'cv', dump_all = dump_all)
 
-    total_sdr, result = comp_oneset(tt_loader)
+    total_sdr, result = comp_oneset(tt_loader, dset)
     dump_result(total_sdr, result, out_dir, prefix = 'tt', dump_all = dump_all)
 
 # change here
-dset = 'wham-easy'
-audio_root = '/home/riviera1020/Big/Corpus/wsj0-mix/'
-data_root = './data/wham-easy/'
+dset = 'libri'
+audio_root = '/home/riviera1020/Big/Corpus/libri-mix/wav8k/min/'
+data_root = './data/libri/'
+dump_all = True
 
-out_dir = os.path.join(data_root, 'mix_sdr')
-Path(out_dir).mkdir(parents=True, exist_ok=True)
-
-cv_loader, tt_loader = load_dset(audio_root, data_root, dset)
-main(out_dir, cv_loader, tt_loader)
+main(dset, audio_root, data_root, dump_all)
