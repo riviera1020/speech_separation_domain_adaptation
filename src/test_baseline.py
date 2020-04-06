@@ -19,6 +19,7 @@ from src.dataset import wsj0_eval
 from src.wham import wham_eval
 from src.evaluation import cal_SDR, cal_SISNRi
 from src.sep_utils import remove_pad, load_mix_sdr
+from src.gender_mapper import GenderMapper
 
 class Tester(Solver):
     def __init__(self, config):
@@ -44,6 +45,7 @@ class Tester(Solver):
         self.set_model(state_dict)
 
         self.compute_sdr = config['solver'].get('compute_sdr', True)
+        self.g_mapper = GenderMapper()
 
     def load_dset(self, dset):
         # root: wsj0_root, vctk_root, libri_root
@@ -127,27 +129,40 @@ class Tester(Solver):
 
         result_dict = {}
 
+        splts = [ 'cv', 'tt' ]
+        gs = [ 'MM', 'FF', 'MF' ]
+        sdr_keys = []
+        for splt in splts:
+            for g in gs:
+                sdr_keys.append(f'{splt}_{g}')
+        sdr_keys = splts + sdr_keys
+
         for dset in dsets:
             cv_loader, tt_loader = self.load_dset(dset)
-            sdr0 = load_mix_sdr(f'./data/{dset}/mix_sdr/', ['cv', 'tt'])
+            sdr0 = load_mix_sdr(f'./data/{dset}/mix_sdr/', sdr_keys)
 
             result_dict[dset] = {}
 
-            r = self.evaluate(cv_loader, 'cv', sdr0)
+            r = self.evaluate(cv_loader, 'cv', dset, sdr0)
             result_dict[dset]['cv'] = r
 
-            r = self.evaluate(tt_loader, 'tt', sdr0)
+            r = self.evaluate(tt_loader, 'tt', dset, sdr0)
             result_dict[dset]['tt'] = r
 
         result_dict['tr_config'] = self.tr_config
         rname = os.path.join(self.result_dir, 'result.json')
         json.dump(result_dict, open(rname, 'w'), indent = 1)
 
-    def evaluate(self, loader, dset, sdr0):
+    def evaluate(self, loader, dset, dataset, sdr0):
         total_loss = 0.
         total_SISNRi = 0
         total_SDR = 0
         total_cnt = 0
+
+        gs = [ 'MM', 'FF', 'MF' ]
+        gender_SISNRi = { g: 0. for g in gs }
+        gender_SDR = { g: 0. for g in gs }
+        gender_cnt = { g: 0. for g in gs }
 
         with torch.no_grad():
             for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
@@ -155,6 +170,7 @@ class Tester(Solver):
                 padded_mixture = sample['mix'].to(DEV)
                 padded_source = sample['ref'].to(DEV)
                 mixture_lengths = sample['ilens'].to(DEV)
+                uids = sample['uid']
 
                 ml = mixture_lengths.max().item()
                 padded_mixture = padded_mixture[:, :ml]
@@ -178,19 +194,39 @@ class Tester(Solver):
                     mix = padded_mixture[b]
                     src_ref = padded_source[b]
                     src_est = reorder_estimate_source[b]
+                    uid = uids[b]
+
+                    g = self.g_mapper(uid, dataset)
+                    gender_cnt[g] += 1
+
+                    sisnri = cal_SISNRi(src_ref, src_est, mix)
+                    total_SISNRi += sisnri
+                    gender_SISNRi[g] += sisnri
 
                     if self.compute_sdr:
-                        total_SDR += cal_SDR(src_ref, src_est)
-                    total_SISNRi += cal_SISNRi(src_ref, src_est, mix)
+                        sdr = cal_SDR(src_ref, src_est)
+                        total_SDR += sdr
+                        gender_SDR[g] += sdr
 
         total_loss /= total_cnt
         total_SISNRi /= total_cnt
+
         if self.compute_sdr:
             total_SDR /= total_cnt
             total_SDRi = total_SDR - sdr0[dset]
         else:
             total_SDRi = 0
 
-        result = { 'total_loss': total_loss, 'total_SDRi': total_SDRi, 'total_SISNRi': total_SISNRi }
+        gender_SDRi = {}
+        for g in gender_SISNRi:
+            gender_SISNRi[g] /= gender_cnt[g]
+            if self.compute_sdr:
+                sdr = gender_SDR[g] / gender_cnt[g]
+                gender_SDRi[g] = sdr - sdr0[f'{dset}_{g}']
+            else:
+                gender_SDRi[g] = 0.
+
+        result = { 'total_loss': total_loss, 'total_SDRi': total_SDRi, 'total_SISNRi': total_SISNRi,
+                   'gender_SDRi': gender_SDRi, 'gender_SISNRi': gender_SISNRi }
         return result
 
