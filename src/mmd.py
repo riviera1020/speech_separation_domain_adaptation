@@ -47,8 +47,10 @@ class MMDLoss(nn.Module):
         source_features: [ B, F, T ]
         target_features: [ B, F, T ]
         """
-        source_features = source_features.mean(dim = -1)
-        target_features = target_features.mean(dim = -1)
+        #source_features = source_features.mean(dim = -1)
+        #target_features = target_features.mean(dim = -1)
+        source_features = source_features.view(source_features.size(0), -1)
+        target_features = target_features.view(target_features.size(0), -1)
         gaussian_kernel = partial(gaussian_kernel_matrix, sigmas = self.sigmas)
         loss_value = maximum_mean_discrepancy(source_features, target_features, kernel= gaussian_kernel)
         loss_value = loss_value
