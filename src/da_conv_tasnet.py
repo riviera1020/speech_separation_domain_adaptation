@@ -3,9 +3,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Function
+from operator import itemgetter
 
 from src.misc import apply_norm
-from src.conv_tasnet import Encoder, Decoder, TemporalBlock, ChannelwiseLayerNorm
+from src.conv_tasnet import Encoder, Decoder, ChannelwiseLayerNorm
+from src.conv_tasnet import DepthwiseSeparableConv, chose_norm
 
 class ReverseLayerF(Function):
 
@@ -52,10 +54,13 @@ class DAConvTasNet(nn.Module):
         self.norm_type = config['norm_type']
         self.causal = config['causal']
         self.mask_nonlinear = config['mask_nonlinear']
+        self.locs = config.get('locs', [(self.R-1, self.X-1)])
+        self.feature_dim = len(self.locs) * self.B
+
         # Components
         self.encoder = Encoder(self.L, self.N)
         self.separator = TemporalConvNet(self.N, self.B, self.H, self.P, self.X, self.R, self.C,
-                self.norm_type, self.causal, self.mask_nonlinear)
+                self.norm_type, self.causal, self.mask_nonlinear, locs = self.locs)
         self.decoder = Decoder(self.N, self.L)
 
         # init
@@ -83,7 +88,7 @@ class DAConvTasNet(nn.Module):
 
 class TemporalConvNet(nn.Module):
     def __init__(self, N, B, H, P, X, R, C, norm_type="gLN", causal=False,
-                 mask_nonlinear='relu'):
+                 mask_nonlinear='relu', locs = None):
         """
         Args:
             N: Number of filters in autoencoder
@@ -128,6 +133,14 @@ class TemporalConvNet(nn.Module):
                                      temporal_conv_net,
                                      mask_conv1x1)
 
+        self.locs = []
+        for loc in locs:
+            r, x = loc
+            assert x < X and r < R
+            idx = r * X + x
+            self.locs.append(idx)
+        self.locs.sort()
+
     def forward(self, mixture_w):
         """
         Keep this API same with TasNet
@@ -138,12 +151,20 @@ class TemporalConvNet(nn.Module):
         """
         M, N, K = mixture_w.size()
 
-        feature = None
+        feature = []
         score = mixture_w
         for i, layer in enumerate(self.network):
-            score = layer(score)
             if i == len(self.network) - 2:
-                feature = score
+                for x, repeat in enumerate(layer):
+                    for r, block in enumerate(repeat):
+                        score, feat = block(score)
+                        feature.append(feat)
+            else:
+                score = layer(score)
+
+        feature = itemgetter(*self.locs)(feature)
+        if len(self.locs) > 1:
+            feature = torch.cat(feature, dim = 1)
 
         score = score.view(M, self.C, N, K) # [M, C*N, K] -> [M, C, N, K]
         if self.mask_nonlinear == 'softmax':
@@ -153,6 +174,52 @@ class TemporalConvNet(nn.Module):
         else:
             raise ValueError("Unsupported mask non-linear function")
         return est_mask, feature
+
+class TemporalBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size,
+                 stride, padding, dilation, norm_type="gLN", causal=False, dropout=0.0, loc = -1, feat_loc = 'residual'):
+        super(TemporalBlock, self).__init__()
+        # [M, B, K] -> [M, H, K]
+        conv1x1 = nn.Conv1d(in_channels, out_channels, 1, bias=False)
+        prelu = nn.PReLU()
+        norm = chose_norm(norm_type, out_channels)
+        # [M, H, K] -> [M, B, K]
+        dsconv = DepthwiseSeparableConv(out_channels, in_channels, kernel_size,
+                                        stride, padding, dilation, norm_type,
+                                        causal)
+
+        self.drop_loc = 3
+        self.dropout = dropout
+        self.net = nn.Sequential(conv1x1, prelu, norm, dsconv)
+
+        if feat_loc == 'residual':
+            self.feat_loc = -1
+        elif feat_loc == 'conv1x1':
+            self.feat_loc = 0
+        elif feat_loc == 'dsconv':
+            self.feat_loc = 3
+
+    def forward(self, x):
+        """
+        Args:
+            x: [M, B, K]
+        Returns:
+            [M, B, K]
+        """
+        feature = None
+        residual = x
+        for i, layer in enumerate(self.net):
+            if i == self.drop_loc and self.dropout > 0:
+                x = F.dropout(x, p=self.dropout)
+            x = layer(x)
+
+            if i == self.feat_loc:
+                feature = x
+
+        ret = x + residual
+        if self.feat_loc == -1:
+            feature = ret
+        return ret, feature
 
 class AvgLayer(nn.Module):
     def __init__(self):

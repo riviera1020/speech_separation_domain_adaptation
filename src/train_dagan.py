@@ -225,7 +225,7 @@ class Trainer(Solver):
     def set_model(self):
 
         self.G = DAConvTasNet(self.config['model']['gen']).to(DEV)
-        self.D = DomainClassifier(self.G.B, self.config['model']['domain_cls']).to(DEV)
+        self.D = DomainClassifier(self.G.feature_dim, self.config['model']['domain_cls']).to(DEV)
 
         self.g_optim = self.set_optim([self.G], self.config['g_optim'])
         self.d_optim = self.set_optim([self.D], self.config['d_optim'])
@@ -409,6 +409,7 @@ class Trainer(Solver):
         total_gp = 0.
         src_domain_acc = 0.
         tgt_domain_acc = 0.
+        total_grad_norm = 0.
         src_cnt = 0
         tgt_cnt = 0
         for _ in range(self.d_iters):
@@ -470,6 +471,7 @@ class Trainer(Solver):
             self.G.zero_grad()
             _d_loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(self.D.parameters(), self.D_grad_clip)
+            total_grad_norm += grad_norm
             if math.isnan(grad_norm):
                 print('Error : grad norm is NaN @ step '+str(step))
             else:
@@ -478,8 +480,10 @@ class Trainer(Solver):
         total_d_loss /= self.d_iters
         weighted_d_loss /= self.d_iters
         total_gp /= self.d_iters
+        total_grad_norm /= self.d_iters
         meta = { f'{prefix}d_loss': total_d_loss,
-                 f'{prefix}gradient_penalty': total_gp }
+                 f'{prefix}gradient_penalty': total_gp,
+                 f'{prefix}grad_norm': total_grad_norm }
         if self.adv_loss == 'gan':
             domain_acc = (src_domain_acc + tgt_domain_acc) / (src_cnt + tgt_cnt)
             src_domain_acc /= src_cnt
@@ -498,6 +502,7 @@ class Trainer(Solver):
         domain_acc = 0.
         src_domain_acc = 0.
         tgt_domain_acc = 0.
+        total_grad_norm = 0.
         cnt = 0
         for _ in range(self.g_iters):
 
@@ -543,6 +548,7 @@ class Trainer(Solver):
             self.G.zero_grad()
             _g_loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(self.G.parameters(), self.G_grad_clip)
+            total_grad_norm += grad_norm
             if math.isnan(grad_norm):
                 print('Error : grad norm is NaN @ step '+str(step))
             else:
@@ -553,6 +559,7 @@ class Trainer(Solver):
 
         total_g_loss /= self.g_iters
         weighted_g_loss /= self.g_iters
+        total_grad_norm /= self.g_iters
         meta = { 'g_loss': total_g_loss,
                  'weighted_g_loss': weighted_g_loss }
         if self.adv_loss == 'gan':
