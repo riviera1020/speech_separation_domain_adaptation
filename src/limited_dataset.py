@@ -156,3 +156,59 @@ class LimitDataset(Dataset):
 
         return sample
 
+class LimitWham(LimitDataset):
+    def __init__(self, id_list_path, audio_root, seg_len, spk_info, spk_num, utts_per_spk, mode = 'tr', scale = 1.0):
+        """
+        Args:
+            id_list_path     : id_list
+            audio_root       : root dir
+            seg_len          : segment len for utt in sec
+            spk_info         : spk:gender info
+            spk_num          : use how many spk in dataset ( wsj0: 101, vctk: 98)
+                               'all' for no sample spk
+            utts_per_spk     : use how many utts per speaker
+                               'all' for no sample utt
+            mode             : tr/cv/tt
+        """
+        super(LimitWham, self).__init__(id_list_path, audio_root, seg_len, spk_info,
+                                        spk_num, utts_per_spk, mode)
+
+        noise_list_path = os.path.join(f'./data/wham/noise_id_list/{mode}.pkl')
+        self.noise_data = cPickle.load(open(noise_list_path, 'rb'))
+        self.scale = scale
+
+    def __len__(self):
+        return len(self.id_list)
+
+    def __getitem__(self, idx):
+        """
+        info struct: [ utt id, chunk id, start, end ]
+        """
+        uid1, spk1, s1, e1, scale1 = self.id_list[idx]
+        uid2, spk2, s2, e2, scale2 = self.sample_from_another_spk(spk1)
+
+        s1_path = self.data[spk1][uid1][0]
+        s2_path = self.data[spk2][uid2][0]
+
+        nkey = s1_path.split('/')[-1]
+        npath, _, ss, sn, _ = self.noise_data[nkey]['noise']
+
+        s1_path = os.path.join(self.audio_root, s1_path)
+        s2_path = os.path.join(self.audio_root, s2_path)
+        npath = os.path.join(self.audio_root, npath)
+
+        s1_audio = self.process(s1_path, s1, e1, scale1)
+        s2_audio = self.process(s2_path, s2, e2, scale2)
+        noise = self.process(npath, s1, e1, scale = 0.)
+
+        snr = random.uniform(0, 2.5)
+        s1_audio, s2_audio, mix_audio = self.mixing(s1_audio, s2_audio, snr)
+        ilen = len(mix_audio)
+
+        sep_audio = np.stack([s1_audio, s2_audio], axis = 0)
+        mix_audio = mix_audio + self.scale + noise
+
+        uid = f'{uid1}_{snr:.6f}_{uid2}_{-snr:.6f}.wav'
+        sample = { 'uid': uid, 'ilens': ilen, 'mix': mix_audio, 'ref': sep_audio }
+
+        return sample
