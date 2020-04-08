@@ -346,6 +346,8 @@ class Trainer(Solver):
             discrepancy_loss, idx = self.dis_loss(uns_m1, uns_m2)
 
             max_d = discrepancy_loss.item()
+            if self.dis_loss.pit:
+                stepb_perms = idx.float().mean().item()
 
             w = self.b_scheduler.value(self.step)
             maximize_dloss = anchor_loss - w * discrepancy_loss
@@ -357,6 +359,7 @@ class Trainer(Solver):
             # step c, only update G (not decoder part)
             min_d = 0
             stepc = 0
+            stepc_perms = 0
             for i in range(self.num_k):
                 _, _, uns_m1, uns_m2 = self.model(uns_mixture)
                 discrepancy_loss, idx = self.dis_loss(uns_m1, uns_m2)
@@ -370,8 +373,12 @@ class Trainer(Solver):
 
                 min_d += minimize_dloss.item()
                 stepc += stepc_grad_norm
+                if self.dis_loss.pit:
+                    stepc_perms += idx.float().mean().item()
+
             min_d /= self.num_k
             stepc_grad_norm = stepc / self.num_k
+            stepc_perms /= self.num_k
 
             meta = { 'iter_loss': sup_loss.item(),
                      'iter_stepb_loss': maximize_dloss.item(),
@@ -380,6 +387,9 @@ class Trainer(Solver):
                      'iter_stepa_grad_norm': stepa_grad_norm,
                      'iter_stepb_grad_norm': stepb_grad_norm,
                      'iter_stepc_gard_norm': stepc_grad_norm }
+            if self.dis_loss.pit:
+                meta['iter_stepb_perms'] = stepb_perms
+                meta['iter_stepc_perms'] = stepc_perms
             self.writer.log_step_info('train', meta)
 
             total_loss += sup_loss.item() * B
