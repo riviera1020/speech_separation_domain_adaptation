@@ -2,11 +2,25 @@ import numpy as np
 
 class RampScheduler(object):
 
-    def __init__(self, start_step, end_step, start_value, end_value, now_step = 0):
+    def __init__(self, start_step, end_step, start_value, end_value, now_step = 0, steps_per_epoch = -1):
+        """
+        if steps_per_epoch != -1:
+            means that start_step, end_step are actually epoch-based
+            but wish to compute on step-based
+            so start_step, end_step will be convert to global step
+            value(step) will be called using global step
+        else:
+            update using original rule
+        """
 
         self.now_step = now_step
-        self.ss = start_step
-        self.es = end_step
+
+        if steps_per_epoch == -1:
+            self.ss = start_step
+            self.es = end_step
+        else:
+            self.ss = (start_step * steps_per_epoch) - 1
+            self.es = (end_step * steps_per_epoch) - 1
 
         self.sv = start_value
         self.ev = end_value

@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 from src.solver import Solver
 from src.saver import Saver
 from src.utils import DEV, DEBUG, NCOL, inf_data_gen, read_scale
-from src.mcd_conv_tasnet import MCDConvTasNet
+from src.mcd_conv_tasnet import MCDConvTasNet, DiscrepancyLoss
 from src.pit_criterion import cal_loss, SISNR
 from src.dataset import wsj0, wsj0_eval
 from src.wham import wham, wham_eval
@@ -81,6 +81,10 @@ class Trainer(Solver):
 
         self.load_data()
         self.set_model()
+
+        steps_per_epoch = len(self.sup_tr_loader)
+        self.b_scheduler = self.set_scheduler(self.config['solver']['b_scheduler'], steps_per_epoch)
+        self.c_scheduler = self.set_scheduler(self.config['solver']['c_scheduler'], steps_per_epoch)
 
     def set_scheduler(self, sch_config):
         if sch_config['function'] == 'ramp':
@@ -172,64 +176,26 @@ class Trainer(Solver):
                 num_workers = self.num_workers)
         return tr_loader, cv_loader
 
-    def set_model(self):
-        self.model = MCDConvTasNet(self.config['model'])
-        self.model = self.model.to(DEV)
+    def set_optim(self, config, parameters, optim_dict = None):
+        lr = config['lr']
+        weight_decay = config['weight_decay']
+        optim_type = config['type']
 
-        # TODO, get optim_dict from pretrained and resume
-        # maybe buggy
-        optim_dict = None
-        pre_path = self.config['solver'].get('pretrained', '')
-        if pre_path != '':
-            optim_dict = self.load_pretrain(pre_path)
-
-        optim_dict = None
-        if self.resume_model:
-            model_path = os.path.join(self.save_dir, 'latest.pth')
-            if model_path != '':
-                print('Resuming Training')
-                print(f'Loading Model: {model_path}')
-
-                info_dict = torch.load(model_path)
-
-                print(f"Previous score: {info_dict['valid_score']}")
-                self.start_epoch = info_dict['epoch'] + 1
-
-                if 'step' in info_dict:
-                    self.step = info_dict['step']
-
-                self.model.load_state_dict(info_dict['state_dict'])
-                print('Loading model complete')
-
-                if self.config['solver']['resume_optim']:
-                    optim_dict = info_dict['optim']
-
-                # dashboard is one-base
-                self.writer.set_epoch(self.start_epoch + 1)
-                self.writer.set_step(self.step + 1)
-
-                if self.fp16 and 'amp' in info_dict:
-                    amp.load_state_dict(info_dict['amp'])
-
-        lr = self.config['optim']['lr']
-        weight_decay = self.config['optim']['weight_decay']
-
-        optim_type = self.config['optim']['type']
         if optim_type == 'SGD':
-            momentum = self.config['optim']['momentum']
-            self.opt = torch.optim.SGD(
-                    self.model.parameters(),
+            momentum = config['momentum']
+            opt = torch.optim.SGD(
+                    parameters,
                     lr = lr,
                     momentum = momentum,
                     weight_decay = weight_decay)
         elif optim_type == 'Adam':
-            self.opt = torch.optim.Adam(
-                    self.model.parameters(),
+            opt = torch.optim.Adam(
+                    parameters,
                     lr = lr,
                     weight_decay = weight_decay)
         elif optim_type == 'ranger':
-            self.opt = Ranger(
-                    self.model.parameters(),
+            opt = Ranger(
+                    parameters(),
                     lr = lr,
                     weight_decay = weight_decay)
         else:
@@ -238,7 +204,61 @@ class Trainer(Solver):
 
         if optim_dict != None:
             print('Resume optim')
-            self.opt.load_state_dict(optim_dict)
+            opt.load_state_dict(optim_dict)
+        return opt
+
+    def set_scheduler(self, sch_config, steps_per_epoch = -1):
+        if sch_config['function'] == 'ramp':
+            return RampScheduler(sch_config['start_step'],
+                                 sch_config['end_step'],
+                                 sch_config['start_value'],
+                                 sch_config['end_value'],
+                                 steps_per_epoch = steps_per_epoch)
+        elif sch_config['function'] == 'constant':
+            return ConstantScheduler(sch_config['value'])
+
+    def set_model(self):
+        self.model = MCDConvTasNet(self.config['model'])
+        self.model = self.model.to(DEV)
+
+        dtype = self.config['solver']['discrepancy_type']
+        use_pit = self.config['solver']['discrepancy_pit']
+        self.dis_loss = DiscrepancyLoss(self.config['model']['C'], dtype, use_pit).to(DEV)
+
+        pre_path = self.config['solver'].get('pretrained', '')
+        if pre_path != '':
+            self.load_pretrain(pre_path)
+
+        optim_dict = None
+        f_optim_dict = None
+        if self.resume_model:
+            model_path = os.path.join(self.save_dir, 'latest.pth')
+            print('Resuming Training')
+            print(f'Loading Model: {model_path}')
+
+            info_dict = torch.load(model_path)
+
+            print(f"Previous score: {info_dict['valid_score']}")
+            self.start_epoch = info_dict['epoch'] + 1
+
+            if 'step' in info_dict:
+                self.step = info_dict['step']
+
+            self.model.load_state_dict(info_dict['state_dict'])
+            print('Loading model complete')
+
+            if self.config['solver']['resume_optim']:
+                optim_dict = info_dict['optim']
+                f_optim_dict = info_dict['f_optim']
+
+            # dashboard is one-base
+            self.writer.set_epoch(self.start_epoch + 1)
+            self.writer.set_step(self.step + 1)
+
+        self.opt = self.set_optim(self.config['optim'],
+                self.model.get_parameters('G'), optim_dict)
+        self.f_opt = self.set_optim(self.config['f_optim'],
+                self.model.get_parameters('F'), f_optim_dict)
 
         self.use_scheduler = False
         if 'scheduler' in self.config['solver']:
@@ -255,24 +275,19 @@ class Trainer(Solver):
                         verbose = True)
 
     def load_pretrain(self, pre_path):
-        # TODO, need to handle mask1x1 not in separator.network
-        pass
-        #pretrained_optim = self.config['solver'].get('pretrained_optim', False)
 
-        #info_dict = torch.load(pre_path)
-        #self.model.load_state_dict(info_dict['state_dict'])
+        info_dict = torch.load(pre_path)
 
-        #print('Load pretrained model')
-        #if 'epoch' in info_dict:
-        #    print(f"Epochs: {info_dict['epoch']}")
-        #elif 'step' in info_dict:
-        #    print(f"Steps : {info_dict['step']}")
-        #print(info_dict['valid_score'])
+        # miss: F1.weight, F2.weight
+        # unexpect: network.3.weight(mask1x1)
+        miss, unexpect = self.model.load_state_dict(info_dict['state_dict'], strict = False)
 
-        #if pretrained_optim:
-        #    return info_dict['optim']
-        #else:
-        #    return None
+        print('Load pretrained model')
+        if 'epoch' in info_dict:
+            print(f"Epochs: {info_dict['epoch']}")
+        elif 'step' in info_dict:
+            print(f"Steps : {info_dict['step']}")
+        print(info_dict['valid_score'])
 
     def exec(self):
         for epoch in tqdm(range(self.start_epoch, self.epochs), ncols = NCOL):
@@ -288,92 +303,110 @@ class Trainer(Solver):
     def train_one_epoch(self, epoch, sup_loader, uns_gen):
         self.model.train()
         total_loss = 0.
+        total_stepb_loss = 0.
+        total_stepc_loss = 0.
         total_maximize_discrepancy = 0.
-        total_minimize_discrepancy = 0.
         cnt = 0
 
         for i, sample in enumerate(tqdm(sup_loader, ncols = NCOL)):
-            self.opt.zero_grad()
+
+            sup_mixture = sample['mix'].to(DEV)
+            sup_source = sample['ref'].to(DEV)
+            sup_lengths = sample['ilens'].to(DEV)
+            B = sup_mixture.size(0)
+
+            uns_sample = uns_gen.__next__()
+            uns_mixture = uns_sample['mix'].to(DEV)
+            uns_lengths = uns_sample['ilens'].to(DEV)
 
             # sup part
-            padded_mixture = sample['mix'].to(DEV)
-            padded_source = sample['ref'].to(DEV)
-            mixture_lengths = sample['ilens'].to(DEV)
-            B = padded_mixture.size(0)
+            est_s1, est_s2, m1, m2 = self.model(sup_mixture)
 
-            estimate_source = self.model(padded_mixture)
+            sup_loss1, max_snr, estimate_source, reorder_estimate_source = \
+                cal_loss(sup_source, est_s1, sup_lengths)
+            sup_loss2, max_snr, estimate_source, reorder_estimate_source = \
+                cal_loss(sup_source, est_s2, sup_lengths)
+            sup_loss = sup_loss1 + sup_loss2
 
-            sup_loss, max_snr, estimate_source, reorder_estimate_source = \
-                cal_loss(padded_source, estimate_source, mixture_lengths)
-            loss = sup_loss
-
-            if self.fp16:
-                with amp.scale_loss(loss, self.opt) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                loss.backward()
-
-            # pi on sup
-            with torch.no_grad():
-                estimate_clean_sup, feat_clean_sup = self.model.fetch_forward(padded_mixture, self.locs)
-            estimate_noise_sup, feat_noise_sup = self.model.fetch_forward(padded_mixture, self.locs, self.transform)
-            loss_pi_sup = self.con_loss(estimate_clean_sup, estimate_noise_sup, mixture_lengths, feat_clean_sup, feat_noise_sup)
-
-            # pi on uns
-            uns_sample = uns_gen.__next__()
-            padded_mixture = uns_sample['mix'].to(DEV)
-            mixture_lengths = uns_sample['ilens'].to(DEV)
-
-            with torch.no_grad():
-                estimate_clean_uns, feat_clean_uns = self.model.fetch_forward(padded_mixture, self.locs)
-            estimate_noise_uns, feat_noise_uns = self.model.fetch_forward(padded_mixture, self.locs, self.transform)
-            loss_pi_uns = self.con_loss(estimate_clean_uns, estimate_noise_uns, mixture_lengths, feat_clean_uns, feat_noise_uns)
-
-            w_sup = self.cal_consistency_weight(self.step, end_ep = self.warmup_step, init_w = self.sup_init_w, end_w = self.sup_pi_lambda)
-            w_uns = self.cal_consistency_weight(self.step, end_ep = self.warmup_step, init_w = self.uns_init_w, end_w = self.uns_pi_lambda)
-            loss = w_sup * loss_pi_sup + w_uns * loss_pi_uns
-
-            if self.fp16:
-                with amp.scale_loss(loss, self.opt) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                loss.backward()
-
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+            self.model.zero_grad()
+            sup_loss.backward()
+            stepa_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
             self.opt.step()
+            self.f_opt.step()
 
-            # forward_hook cause memory leak, need to release(del) them
-            for feat in [ feat_clean_sup, feat_noise_sup, feat_clean_uns, feat_noise_uns ]:
-                self.model.clean_hook_tensor(feat)
+            # step b, only update F
+            est_s1, est_s2, m1, m2 = self.model(sup_mixture)
+            _, _, uns_m1, uns_m2 = self.model(uns_mixture)
+
+            sup_loss1, max_snr, estimate_source, reorder_estimate_source = \
+                cal_loss(sup_source, est_s1, sup_lengths)
+            sup_loss2, max_snr, estimate_source, reorder_estimate_source = \
+                cal_loss(sup_source, est_s2, sup_lengths)
+            anchor_loss = sup_loss1 + sup_loss2
+            discrepancy_loss, idx = self.dis_loss(uns_m1, uns_m2)
+
+            max_d = discrepancy_loss.item()
+
+            w = self.b_scheduler.value(self.step)
+            maximize_dloss = anchor_loss - w * discrepancy_loss
+            self.model.zero_grad()
+            maximize_dloss.backward()
+            stepb_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+            self.f_opt.step()
+
+            # step c, only update G (not decoder part)
+            min_d = 0
+            stepc = 0
+            for i in range(self.num_k):
+                _, _, uns_m1, uns_m2 = self.model(uns_mixture)
+                discrepancy_loss, idx = self.dis_loss(uns_m1, uns_m2)
+                w = self.c_scheduler.value(self.step)
+                minimize_dloss = w * discrepancy_loss
+
+                self.model.zero_grad()
+                minimize_dloss.backward()
+                stepc_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+                self.opt.step()
+
+                min_d += minimize_dloss.item()
+                stepc += stepc_grad_norm
+            min_d /= self.num_k
+            stepc_grad_norm = stepc / self.num_k
 
             meta = { 'iter_loss': sup_loss.item(),
-                     'iter_pi_sup_loss': loss_pi_sup.item(),
-                     'iter_pi_uns_loss': loss_pi_uns.item(),
-                     'w_sup': w_sup,
-                     'w_uns': w_uns }
+                     'iter_stepb_loss': maximize_dloss.item(),
+                     'maximize_discrepancy': max_d,
+                     'iter_stepc_loss': min_d,
+                     'iter_stepa_grad_norm': stepa_grad_norm,
+                     'iter_stepb_grad_norm': stepb_grad_norm,
+                     'iter_stepc_gard_norm': stepc_grad_norm }
             self.writer.log_step_info('train', meta)
 
             total_loss += sup_loss.item() * B
-            total_pi_sup += loss_pi_sup.item() * B
-            total_pi_uns += loss_pi_uns.item() * B
+            total_stepb_loss += maximize_dloss.item() * B
+            total_stepc_loss += min_d * B
+            total_maximize_discrepancy += max_d * B
             cnt += B
 
             self.step += 1
             self.writer.step()
 
-        total_loss = total_loss / cnt
-        total_pi_sup = total_pi_sup / cnt
-        total_pi_uns = total_pi_uns / cnt
+        total_loss /= cnt
+        total_stepb_loss /= cnt
+        total_stepc_loss /= cnt
+        total_maximize_discrepancy /= cnt
 
         meta = { 'epoch_loss': total_loss,
-                 'epoch_pi_sup_loss': total_pi_sup,
-                 'epoch_pi_uns_loss': total_pi_uns }
+                 'epoch_stepb_loss': total_stepb_loss,
+                 'epoch_stepc_loss': total_stepc_loss,
+                 'epoch_maximize_discrepancy': total_maximize_discrepancy }
         self.writer.log_epoch_info('train', meta)
 
     def valid(self, loader, epoch, no_save = False, prefix = ""):
         self.model.eval()
         total_loss = 0.
-        total_sisnri = 0.
+        total_sisnri1 = 0.
+        total_sisnri2 = 0.
         cnt = 0
 
         with torch.no_grad():
@@ -388,28 +421,37 @@ class Trainer(Solver):
                 padded_mixture = padded_mixture[:, :ml]
                 padded_source = padded_source[:, :, :ml]
 
-                estimate_source = self.model(padded_mixture)
+                est_s1, est_s2, m1, m2 = self.model(padded_mixture)
 
-                loss, max_snr, estimate_source, reorder_estimate_source = \
-                    cal_loss(padded_source, estimate_source, mixture_lengths)
+                loss1, max_snr1, estimate_source, reorder_estimate_source = \
+                    cal_loss(padded_source, est_s1, mixture_lengths)
+                loss2, max_snr2, estimate_source, reorder_estimate_source = \
+                    cal_loss(padded_source, est_s2, mixture_lengths)
 
                 mix_sisnr = SISNR(padded_source, padded_mixture, mixture_lengths)
-                max_sisnri = (max_snr - mix_sisnr)
+                max_sisnri1 = (max_snr1 - mix_sisnr)
+                max_sisnri2 = (max_snr2 - mix_sisnr)
 
-                total_loss += loss.item() * B
-                total_sisnri += max_sisnri.sum().item()
+                total_loss += (loss1 + loss2).item() / 2 * B
+                total_sisnri1 += max_sisnri1.sum().item()
+                total_sisnri2 += max_sisnri2.sum().item()
                 cnt += B
 
         total_loss = total_loss / cnt
-        total_sisnri = total_sisnri / cnt
+        total_sisnri1 = total_sisnri1 / cnt
+        total_sisnri2 = total_sisnri2 / cnt
 
         meta = { f'{prefix}_epoch_loss': total_loss,
-                 f'{prefix}_epoch_sisnri': total_sisnri }
+                 f'{prefix}_epoch_sisnri': total_sisnri1,
+                 f'{prefix}_epoch_sisnri_2': total_sisnri2 }
         self.writer.log_epoch_info('valid', meta)
 
+        crit = max(total_sisnri1, total_sisnri2)
         valid_score = {}
         valid_score['valid_loss'] = total_loss
-        valid_score['valid_sisnri'] = total_sisnri
+        valid_score['valid_sisnri'] = crit
+        valid_score['valid_sisnri_1'] = total_sisnri1
+        valid_score['valid_sisnri_2'] = total_sisnri2
 
         if no_save:
             return
@@ -417,10 +459,9 @@ class Trainer(Solver):
         model_name = f'{epoch}.pth'
         info_dict = { 'epoch': epoch, 'step': self.step, 'valid_score': valid_score, 'config': self.config }
         info_dict['optim'] = self.opt.state_dict()
-        if self.fp16:
-            info_dict['amp'] = amp.state_dict()
+        info_dict['f_optim'] = self.f_opt.state_dict()
 
-        self.saver.update(self.model, total_sisnri, model_name, info_dict)
+        self.saver.update(self.model, crit, model_name, info_dict)
 
         model_name = 'latest.pth'
         self.saver.force_save(self.model, model_name, info_dict)
@@ -428,5 +469,3 @@ class Trainer(Solver):
         if self.use_scheduler:
             if self.scheduler_type == 'ReduceLROnPlateau':
                 self.lr_scheduler.step(total_loss)
-            #elif self.scheduler_type in [ 'FlatCosine', 'CosineWarmup' ]:
-            #    self.lr_scheduler.step(epoch)
