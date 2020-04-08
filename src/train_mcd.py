@@ -380,7 +380,7 @@ class Trainer(Solver):
             stepc_grad_norm = stepc / self.num_k
             stepc_perms /= self.num_k
 
-            meta = { 'iter_loss': sup_loss.item(),
+            meta = { 'iter_loss': sup_loss.item() / 2,
                      'iter_stepb_loss': maximize_dloss.item(),
                      'maximize_discrepancy': max_d,
                      'iter_stepc_loss': min_d,
