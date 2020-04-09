@@ -150,7 +150,9 @@ class DiscrepancyLoss(nn.Module):
             return dis, None
 
         B, C, _, _ = m1.size()
+        # [ B, 1, C, NK ]
         m1 = m1.view(B, C, -1).unsqueeze(dim = 1)
+        # [ B, C, 1, NK ]
         m2 = m2.view(B, C, -1).unsqueeze(dim = 2)
 
         # [B, C, C]

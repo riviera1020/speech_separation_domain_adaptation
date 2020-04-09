@@ -317,6 +317,7 @@ class Trainer(Solver):
 
             uns_sample = uns_gen.__next__()
             uns_mixture = uns_sample['mix'].to(DEV)
+            uns_source = uns_sample['ref'].to(DEV)
             uns_lengths = uns_sample['ilens'].to(DEV)
 
             # sup part
@@ -336,7 +337,7 @@ class Trainer(Solver):
 
             # step b, only update F
             est_s1, est_s2, m1, m2 = self.model(sup_mixture)
-            _, _, uns_m1, uns_m2 = self.model(uns_mixture)
+            uns_est_s1, uns_est_s2, uns_m1, uns_m2 = self.model(uns_mixture)
 
             sup_loss1, max_snr, estimate_source, reorder_estimate_source = \
                 cal_loss(sup_source, est_s1, sup_lengths)
@@ -349,8 +350,17 @@ class Trainer(Solver):
             if self.dis_loss.pit:
                 stepb_perms = idx.float().mean().item()
 
+            with torch.no_grad():
+                uns_loss1, max_snr, estimate_source, reorder_estimate_source = \
+                    cal_loss(uns_source, uns_est_s1, uns_lengths)
+                uns_loss2, max_snr, estimate_source, reorder_estimate_source = \
+                    cal_loss(uns_source, uns_est_s2, uns_lengths)
+                stepb_uns_sisnr1 = uns_loss1.item()
+                stepb_uns_sisnr2 = uns_loss2.item()
+
             w = self.b_scheduler.value(self.step)
             maximize_dloss = anchor_loss - w * discrepancy_loss
+            #maximize_dloss = -1 * (w * discrepancy_loss)
             self.model.zero_grad()
             maximize_dloss.backward()
             stepb_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
@@ -361,10 +371,20 @@ class Trainer(Solver):
             stepc = 0
             stepc_perms = 0
             for i in range(self.num_k):
-                _, _, uns_m1, uns_m2 = self.model(uns_mixture)
+                uns_est_s1, uns_est_s2, uns_m1, uns_m2 = self.model(uns_mixture)
                 discrepancy_loss, idx = self.dis_loss(uns_m1, uns_m2)
                 w = self.c_scheduler.value(self.step)
                 minimize_dloss = w * discrepancy_loss
+
+                # only record step1
+                if i == 0:
+                    with torch.no_grad():
+                        uns_loss1, max_snr, estimate_source, reorder_estimate_source = \
+                            cal_loss(uns_source, uns_est_s1, uns_lengths)
+                        uns_loss2, max_snr, estimate_source, reorder_estimate_source = \
+                            cal_loss(uns_source, uns_est_s2, uns_lengths)
+                        stepc_uns_sisnr1 = uns_loss1.item()
+                        stepc_uns_sisnr2 = uns_loss2.item()
 
                 self.model.zero_grad()
                 minimize_dloss.backward()
@@ -384,6 +404,10 @@ class Trainer(Solver):
                      'iter_stepb_loss': maximize_dloss.item(),
                      'maximize_discrepancy': max_d,
                      'iter_stepc_loss': min_d,
+                     'iter_stepb_uns_sisnr1': stepb_uns_sisnr1,
+                     'iter_stepb_uns_sisnr2': stepb_uns_sisnr2,
+                     'iter_stepc_uns_sisnr1': stepc_uns_sisnr1,
+                     'iter_stepc_uns_sisnr2': stepc_uns_sisnr2,
                      'iter_stepa_grad_norm': stepa_grad_norm,
                      'iter_stepb_grad_norm': stepb_grad_norm,
                      'iter_stepc_gard_norm': stepc_grad_norm }
