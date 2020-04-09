@@ -71,6 +71,7 @@ class LimitDataset(Dataset):
         self.spk2utts = {}
         cnt = 0
         lens = []
+        max_utts = []
         for spk in self.spks:
             self.spk2utts[spk] = []
             utts = list(self.data[spk].keys())
@@ -78,6 +79,7 @@ class LimitDataset(Dataset):
             if utts_per_spk != 'all':
                 random.shuffle(utts)
                 utts = utts[:utts_per_spk]
+            max_utts.append(len(utts))
             for uid in utts:
                 path, utt_len, scale = self.data[spk][uid]
                 re = utt_len - self.seg_len
@@ -91,10 +93,26 @@ class LimitDataset(Dataset):
                 self.spk2utts[spk].append(info)
                 cnt += 1
         duration = float(cnt) * self.seg_len / self.sr / 3600
+        max_utts_per_spk = max(max_utts)
+
         print(f'Speaker Num: {self.spk_num}')
         print(f'Utts per speaker: {utts_per_spk}')
+        print(f'Max Utts per speaker: {max_utts_per_spk}')
         print(f'Total utt Num: {cnt}')
         print(f'Total duration: {duration}')
+
+        self.utts_per_spk = utts_per_spk
+        self.utt_num = cnt
+        self.duration = duration
+        self.max_utts_per_spk = max_utts_per_spk
+
+    def get_info(self):
+        ret = { 'spk_num': self.spk_num,
+                'utts_per_spk': self.utts_per_spk,
+                'max_utts_per_spk': self.max_utts_per_spk,
+                'utt_num': self.utt_num,
+                'duration': self.duration }
+        return ret
 
     def pad_audio(self, audio, ilen):
         base = np.zeros(self.seg_len, dtype = np.float32)

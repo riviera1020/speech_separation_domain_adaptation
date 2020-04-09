@@ -81,6 +81,8 @@ if __name__ == '__main__':
         from src.train_mixemb import Trainer as Solver
     elif mode == 'mcd':
         from src.train_mcd import Trainer as Solver
+    elif mode == 'limit':
+        from src.train_limit import Trainer as Solver
     else:
         print('Not imp')
         exit()
