@@ -431,6 +431,13 @@ class Trainer(Solver):
                     src_dp = ((F.sigmoid(d_fake_out) >= 0.5).float() == self.src_label).float()
                     src_domain_acc += src_dp.sum().item()
                     src_cnt += src_dp.numel()
+            elif self.adv_loss == 'hinge':
+                d_fake_out = self.D(src_feat)
+                d_fake_loss = F.relu(d_fake_out).mean()
+                with torch.no_grad():
+                    src_dp = ((F.sigmoid(d_fake_out) >= 0.5).float() == self.src_label).float()
+                    src_domain_acc += src_dp.sum().item()
+                    src_cnt += src_dp.numel()
 
             # true(tgt) sample
             sample = tgt_gen.__next__()
@@ -445,6 +452,13 @@ class Trainer(Solver):
                 d_real_out = self.D(tgt_feat)
                 d_real_loss = self.bce_loss(d_real_out,
                                             self.tgt_label.expand_as(d_real_out))
+                with torch.no_grad():
+                    tgt_dp = ((F.sigmoid(d_real_out) >= 0.5).float() == self.tgt_label).float()
+                    tgt_domain_acc += tgt_dp.sum().item()
+                    tgt_cnt += tgt_dp.numel()
+            elif self.adv_loss == 'hinge':
+                d_real_out = self.D(tgt_feat)
+                d_real_loss = F.relu(1.0 - d_real_out).mean()
                 with torch.no_grad():
                     tgt_dp = ((F.sigmoid(d_real_out) >= 0.5).float() == self.tgt_label).float()
                     tgt_domain_acc += tgt_dp.sum().item()
@@ -484,7 +498,7 @@ class Trainer(Solver):
         meta = { f'{prefix}d_loss': total_d_loss,
                  f'{prefix}gradient_penalty': total_gp,
                  f'{prefix}grad_norm': total_grad_norm }
-        if self.adv_loss == 'gan':
+        if self.adv_loss == 'gan' or self.adv_loss == 'hinge':
             domain_acc = (src_domain_acc + tgt_domain_acc) / (src_cnt + tgt_cnt)
             src_domain_acc /= src_cnt
             tgt_domain_acc /= tgt_cnt
@@ -522,6 +536,9 @@ class Trainer(Solver):
                     src_dp = ((F.sigmoid(g_fake_out) >= 0.5).float() == self.src_label).float()
                     domain_acc += src_dp.sum().item()
                     cnt += src_dp.numel()
+            elif self.adv_loss == 'hinge':
+                g_fake_out = self.D(src_feat)
+                g_fake_loss = - g_fake_out.mean()
 
             # true(tgt) sample
             sample = tgt_gen.__next__()
@@ -539,6 +556,9 @@ class Trainer(Solver):
                     tgt_dp = ((F.sigmoid(g_real_out) >= 0.5).float() == self.tgt_label).float()
                     domain_acc += tgt_dp.sum().item()
                     cnt += tgt_dp.numel()
+            elif self.adv_loss == 'hinge':
+                g_real_out = self.D(tgt_feat)
+                g_real_loss = g_real_out.mean()
 
             g_loss = g_real_loss + g_fake_loss
             g_lambda = self.Lg_scheduler.value(step)
