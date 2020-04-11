@@ -141,7 +141,7 @@ class Trainer(Solver):
         # root: wsj0_root, vctk_root, libri_root
         d = 'wsj' if dset == 'wsj0' else dset # stupid error
         if 'wham' in dset:
-            return self.load_wham(dset, 'cv')
+            return self.load_wham(dset, seg_len = -1, mode = 'cv')
 
         audio_root = self.config['data'][f'{d}_root']
         cv_list = f'./data/{dset}/id_list/cv.pkl'
