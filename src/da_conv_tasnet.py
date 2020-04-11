@@ -55,7 +55,10 @@ class DAConvTasNet(nn.Module):
         self.causal = config['causal']
         self.mask_nonlinear = config['mask_nonlinear']
         self.locs = config.get('locs', [(self.R-1, self.X-1)])
+        self.consider_enc = config.get('consider_enc', False)
         self.feature_dim = len(self.locs) * self.B
+        if self.consider_enc:
+            self.feature_dim += self.N
 
         # Components
         self.encoder = Encoder(self.L, self.N)
@@ -77,6 +80,8 @@ class DAConvTasNet(nn.Module):
         """
         mixture_w = self.encoder(mixture)
         est_mask, feature = self.separator(mixture_w)
+        if self.consider_enc:
+            feature = torch.cat([feature, mixture_w], dim = 1)
         est_source = self.decoder(mixture_w, est_mask)
 
         # T changed after conv1d in encoder, fix it here

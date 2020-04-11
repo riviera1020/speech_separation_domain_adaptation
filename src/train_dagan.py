@@ -88,13 +88,19 @@ class Trainer(Solver):
         self.load_data()
         self.set_model()
 
+        # TODO, add tags
+        self.script_name = os.path.basename(__file__).split('.')[0].split('_')[-1]
+
     def load_data(self):
         # Set training dataset
         dset = 'wsj0'
         if 'dset' in self.config['data']:
             dset = self.config['data']['dset']
         self.dset = dset
-        self.uns_dset = self.config['solver'].get('uns_dset', 'vctk')
+        self.uns_dset = self.config['data'].get('uns_dset', 'vctk')
+
+        print(f'Sup: {self.dset}')
+        print(f'Uns: {self.uns_dset}')
 
         # Load loader for sup training
         seg_len = self.config['data']['segment']

@@ -44,14 +44,8 @@ class Dashboard:
             if DEBUG:
                 self.exp.add_tag("debug")
 
-        ##slurm-related, record the jobid
-        '''
-        hostname = os.uname()[1]
-        if len(hostname.split('.')) == 2 and hostname.split('.')[1] == 'speech':
-            self.exp.log_other('jobid', int(os.getenv('PMIX_NAMESPACE').split('.')[2]))
-        else:
-            self.exp.log_other('jobid', -1)
-        '''
+    def add_tag(self, tag):
+        self.exp.add_tag(tag)
 
     def log_config(self,config):
         #NOTE: depth at most 2
@@ -61,6 +55,10 @@ class Dashboard:
                     self.exp.log_parameters(p, prefix=f'{block}-{n}')
                 else:
                     self.exp.log_parameter(f'{block}-{n}', p)
+
+    def set_script(self, name):
+        # log train_{name}
+        self.exp.log_other('script', name)
 
     def set_status(self,status):
         ## training / trained / decode / completed

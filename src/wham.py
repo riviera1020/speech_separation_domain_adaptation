@@ -277,3 +277,48 @@ class wham_eval(Dataset):
         sample = { 'uid': uid, 'cid': cid, 'ilens': ilen,
                    'mix': mix_audio, 'ref': sep_audio }
         return sample
+
+class wham_parallel_eval(wham_eval):
+    def __getitem__(self, idx):
+        """
+        info struct: [ utt id, chunk id, start, end ]
+        """
+        uid, cid, s, e = self.id_list[idx]
+        npath, _, ss, sn, _ = self.noise_data[uid]['noise']
+        if self.pre_load:
+            mix_audio = self.audios[uid]['mix']
+            s1_audio = self.audios[uid]['s1']
+            s2_audio = self.audios[uid]['s2']
+        else:
+            mix_path = os.path.join(self.audio_root, self.data[uid]['mix'][0])
+            s1_path = os.path.join(self.audio_root, self.data[uid]['s1'][0])
+            s2_path = os.path.join(self.audio_root, self.data[uid]['s2'][0])
+            noise_path = os.path.join(self.audio_root, npath)
+
+            mix_audio = self.load_audio(mix_path, ss)
+            s1_audio = self.load_audio(s1_path, ss)
+            s2_audio = self.load_audio(s2_path, ss)
+            noise_audio = self.load_audio(noise_path, sn)
+
+            mix_audio = mix_audio.astype(np.float32)
+            s1_audio = s1_audio.astype(np.float32)
+            s2_audio = s2_audio.astype(np.float32)
+            noise_audio = noise_audio.astype(np.float32)
+
+        ilen = len(mix_audio)
+        noise_audio = noise_audio[:ilen]
+
+        clean_mix = mix_audio
+        noisy_mix = mix_audio + self.scale * noise_audio
+
+        if ilen < self.maxlen:
+            mix_audio = self.pad_audio(mix_audio, ilen)
+            s1_audio = self.pad_audio(s1_audio, ilen)
+            s2_audio = self.pad_audio(s2_audio, ilen)
+
+        sep_audio = np.stack([s1_audio, s2_audio], axis = 0)
+        sample = { 'uid': uid, 'cid': cid, 'ilens': ilen,
+                   'clean_mix': clean_mix,
+                   'noisy_mix': noisy_mix,
+                   'ref': sep_audio }
+        return sample
