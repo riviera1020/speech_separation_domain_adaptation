@@ -86,6 +86,9 @@ class Trainer(Solver):
             yaml.dump(config, open(os.path.join(self.save_dir, 'config.yaml'), 'w'),
                     default_flow_style = False ,indent = 4)
 
+        self.script_name = os.path.basename(__file__).split('.')[0].split('_')[-1]
+        self.writer.add_tags(self.script_name)
+
     def set_scheduler(self, sch_config):
         if sch_config['function'] == 'ramp':
             return RampScheduler(sch_config['start_step'],

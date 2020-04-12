@@ -131,6 +131,9 @@ class Trainer(Solver):
         self.fp16 = config['solver'].get('fp16', False)
         self.convert_fp16()
 
+        self.script_name = os.path.basename(__file__).split('.')[0].split('_')[-1]
+        self.writer.add_tags(self.script_name)
+
     def set_transform(self, t_conf):
         self.transform = InputTransform(t_conf)
 

@@ -85,6 +85,9 @@ class Trainer(Solver):
         self.load_data()
         self.set_model()
 
+        self.script_name = os.path.basename(__file__).split('.')[0].split('_')[-1]
+        self.writer.add_tags(self.script_name)
+
     def load_data(self):
         # Set training dataset
         dset = self.config['data'].get('dset', 'wsj0')
