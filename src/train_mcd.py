@@ -87,7 +87,7 @@ class Trainer(Solver):
         self.c_scheduler = self.set_scheduler(self.config['solver']['c_scheduler'], steps_per_epoch)
 
         self.script_name = os.path.basename(__file__).split('.')[0].split('_')[-1]
-        self.writer.add_tags(self.script_name)
+        self.writer.add_tag(self.script_name)
 
     def set_scheduler(self, sch_config):
         if sch_config['function'] == 'ramp':
