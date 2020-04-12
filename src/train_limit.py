@@ -120,6 +120,7 @@ class Trainer(Solver):
 
         _, self.limit_cv_loader = self.load_dset(self.limit_dset, 4.0)
         self.limit_tr_loader = self.load_limit(limit_dset, limit_seg_len, limit_spk_num, limit_utts_per_spk)
+        exit()
 
     def load_dset(self, dset, seg_len):
         # root: wsj0_root, vctk_root, libri_root
@@ -197,7 +198,8 @@ class Trainer(Solver):
                     spk_info = spk_info,
                     spk_num = spk_num,
                     utts_per_spk = utts_per_spk,
-                    mode = 'tr')
+                    mode = 'tr',
+                    seg_rule = dset)
         else:
             audio_root = self.config['data'][f'wsj_root']
             tr_list = f'./data/wsj0/single_list/tr.pkl'
@@ -212,6 +214,7 @@ class Trainer(Solver):
                     spk_num = spk_num,
                     utts_per_spk = utts_per_spk,
                     mode = 'tr',
+                    seg_rule = 'wsj0',
                     scale = scale)
 
         self.limit_info = trainset.get_info()

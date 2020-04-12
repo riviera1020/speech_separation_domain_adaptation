@@ -7,8 +7,30 @@ import soundfile as sf
 import _pickle as cPickle
 from torch.utils.data import Dataset
 
+def sample_seg(utt_len, seg_len):
+    re = utt_len - seg_len
+    if re == 0:
+        s = 0
+    else:
+        s = random.randint(0, re - 1)
+    e = s + seg_len
+    return s, e
+
+def define_maxrep(seg_len, seg_rule):
+    base_len = 1.0
+    if seg_len > base_len:
+        print('bigger than 1.0 seg')
+        print('redefine maxrep')
+        exit()
+    ratio = int(base_len / seg_len)
+    if seg_rule == 'wsj0':
+        max_rep = 4
+    else:
+        max_rep = 1
+    return max_rep * ratio
+
 class LimitDataset(Dataset):
-    def __init__(self, id_list_path, audio_root, seg_len, spk_info, spk_num, utts_per_spk, mode = 'tr'):
+    def __init__(self, id_list_path, audio_root, seg_len, spk_info, spk_num, utts_per_spk, mode = 'tr', seg_rule = 'wsj0'):
         """
         Args:
             id_list_path     : id_list
@@ -20,6 +42,7 @@ class LimitDataset(Dataset):
             utts_per_spk     : use how many utts per speaker
                                'all' for no sample utt
             mode             : tr/cv/tt
+            seg_rule         : wsj0, vctk
         """
         super(LimitDataset, self).__init__()
 
@@ -32,6 +55,7 @@ class LimitDataset(Dataset):
 
         males = []
         females = []
+        max_rep = define_maxrep(seg_len, seg_rule)
 
         drop_num = 0
         drop_len = 0.0
@@ -82,16 +106,20 @@ class LimitDataset(Dataset):
             max_utts.append(len(utts))
             for uid in utts:
                 path, utt_len, scale = self.data[spk][uid]
-                re = utt_len - self.seg_len
-                if re == 0:
-                    s = 0
-                else:
-                    s = random.randint(0, re - 1)
-                e = s + self.seg_len
-                info = [ uid, spk, s, e, scale ]
-                self.id_list.append(info)
-                self.spk2utts[spk].append(info)
-                cnt += 1
+                r = utt_len // self.seg_len
+                r = min(max_rep, r)
+                nseg_len = r * self.seg_len
+                info = []
+                s, e = sample_seg(utt_len, nseg_len)
+                for i in range(r):
+                    ss = s + i * self.seg_len
+                    ee = ss + self.seg_len
+                    info.append([ uid, spk, ss, ee, scale ])
+                    cnt += 1
+
+                self.id_list += info
+                self.spk2utts[spk] += info
+
         duration = float(cnt) * self.seg_len / self.sr / 3600
         max_utts_per_spk = max(max_utts)
 
@@ -175,7 +203,7 @@ class LimitDataset(Dataset):
         return sample
 
 class LimitWham(LimitDataset):
-    def __init__(self, id_list_path, audio_root, seg_len, spk_info, spk_num, utts_per_spk, mode = 'tr', scale = 1.0):
+    def __init__(self, id_list_path, audio_root, seg_len, spk_info, spk_num, utts_per_spk, mode = 'tr', seg_rule = 'wsj0', scale = 1.0):
         """
         Args:
             id_list_path     : id_list
@@ -189,7 +217,7 @@ class LimitWham(LimitDataset):
             mode             : tr/cv/tt
         """
         super(LimitWham, self).__init__(id_list_path, audio_root, seg_len, spk_info,
-                                        spk_num, utts_per_spk, mode)
+                                        spk_num, utts_per_spk, mode, seg_rule)
 
         noise_list_path = os.path.join(f'./data/wham/noise_id_list/{mode}.pkl')
         self.noise_data = cPickle.load(open(noise_list_path, 'rb'))
