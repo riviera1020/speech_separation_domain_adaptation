@@ -120,7 +120,6 @@ class Trainer(Solver):
 
         _, self.limit_cv_loader = self.load_dset(self.limit_dset, 4.0)
         self.limit_tr_loader = self.load_limit(limit_dset, limit_seg_len, limit_spk_num, limit_utts_per_spk)
-        exit()
 
     def load_dset(self, dset, seg_len):
         # root: wsj0_root, vctk_root, libri_root
