@@ -91,6 +91,26 @@ class DAConvTasNet(nn.Module):
 
         return est_source, feature
 
+    def dict_forward(self, mixture):
+        """
+        Args:
+            mixture: [M, T], M is batch size, T is #samples
+        Returns:
+            est_source: [M, C, T]
+        """
+        mixture_w = self.encoder(mixture)
+        est_mask, feature = self.separator.dict_forward(mixture_w)
+        feature['enc'] = mixture_w
+
+        est_source = self.decoder(mixture_w, est_mask)
+
+        # T changed after conv1d in encoder, fix it here
+        T_origin = mixture.size(-1)
+        T_conv = est_source.size(-1)
+        est_source = F.pad(est_source, (0, T_origin - T_conv))
+
+        return est_source, feature
+
 class TemporalConvNet(nn.Module):
     def __init__(self, N, B, H, P, X, R, C, norm_type="gLN", causal=False,
                  mask_nonlinear='relu', locs = None):
@@ -110,6 +130,8 @@ class TemporalConvNet(nn.Module):
         super(TemporalConvNet, self).__init__()
         # Hyper-parameter
         self.C = C
+        self.X = X
+        self.R = R
         self.mask_nonlinear = mask_nonlinear
         # Components
         # [M, N, K] -> [M, N, K]
@@ -160,8 +182,8 @@ class TemporalConvNet(nn.Module):
         score = mixture_w
         for i, layer in enumerate(self.network):
             if i == len(self.network) - 2:
-                for x, repeat in enumerate(layer):
-                    for r, block in enumerate(repeat):
+                for r, repeat in enumerate(layer):
+                    for x, block in enumerate(repeat):
                         score, feat = block(score)
                         feature.append(feat)
             else:
@@ -170,6 +192,37 @@ class TemporalConvNet(nn.Module):
         feature = itemgetter(*self.locs)(feature)
         if len(self.locs) > 1:
             feature = torch.cat(feature, dim = 1)
+
+        score = score.view(M, self.C, N, K) # [M, C*N, K] -> [M, C, N, K]
+        if self.mask_nonlinear == 'softmax':
+            est_mask = F.softmax(score, dim=1)
+        elif self.mask_nonlinear == 'relu':
+            est_mask = F.relu(score)
+        else:
+            raise ValueError("Unsupported mask non-linear function")
+        return est_mask, feature
+
+    def dict_forward(self, mixture_w):
+        """
+        Keep this API same with TasNet
+        Args:
+            mixture_w: [M, N, K], M is batch size
+        returns:
+            est_mask: [M, C, N, K]
+        """
+        M, N, K = mixture_w.size()
+
+        feature = {}
+        score = mixture_w
+        for i, layer in enumerate(self.network):
+            if i == len(self.network) - 2:
+                for r, repeat in enumerate(layer):
+                    for x, block in enumerate(repeat):
+                        score, feat = block(score)
+                        idx = r * self.X + x
+                        feature[idx] = feat
+            else:
+                score = layer(score)
 
         score = score.view(M, self.C, N, K) # [M, C*N, K] -> [M, C, N, K]
         if self.mask_nonlinear == 'softmax':

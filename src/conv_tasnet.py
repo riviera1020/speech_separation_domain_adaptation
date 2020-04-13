@@ -227,7 +227,7 @@ class TemporalBlock(nn.Module):
         residual = x
         for i, layer in enumerate(self.net):
             if i == self.drop_loc and self.dropout > 0:
-                x = F.dropout(x, p=self.dropout)
+                x = F.dropout(x, p=self.dropout, training = self.training)
             x = layer(x)
         return x + residual
 
