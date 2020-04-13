@@ -11,8 +11,6 @@ EPS = 1e-8
 
 
 class ConvTasNet(nn.Module):
-    #def __init__(self, N, L, B, H, P, X, R, C, norm_type="gLN", causal=False,
-    #             mask_nonlinear='relu'):
     def __init__(self, config):
         """
         Args:
@@ -44,8 +42,13 @@ class ConvTasNet(nn.Module):
         self.causal = config['causal']
         self.mask_nonlinear = config['mask_nonlinear']
         self.dropout = config.get('dropout', 0.0)
+        self.enc_dropout = config.get('enc_dropout', 0.0)
+
+        print(f'Dropout: {self.dropout}')
+        print(f'Enc Dropout: {self.enc_dropout}')
+
         # Components
-        self.encoder = Encoder(self.L, self.N)
+        self.encoder = Encoder(self.L, self.N, dropout = self.enc_dropout)
         self.separator = TemporalConvNet(self.N, self.B, self.H, self.P, self.X, self.R, self.C,
                 self.norm_type, self.causal, self.mask_nonlinear, self.dropout)
         self.decoder = Decoder(self.N, self.L)
@@ -75,13 +78,17 @@ class ConvTasNet(nn.Module):
 class Encoder(nn.Module):
     """Estimation of the nonnegative mixture weight by a 1-D conv layer.
     """
-    def __init__(self, L, N):
+    def __init__(self, L, N, dropout = 0.0):
         super(Encoder, self).__init__()
         # Hyper-parameter
         self.L, self.N = L, N
         # Components
         # 50% overlap
         self.conv1d_U = nn.Conv1d(1, N, kernel_size=L, stride=L // 2, bias=False)
+
+        self.d = dropout
+        if dropout > 0:
+            self.dropout = nn.Dropout(self.d)
 
     def cal_lengths(self, mixture_lengths):
         return (2 * mixture_lengths // self.L) - 1
@@ -95,6 +102,8 @@ class Encoder(nn.Module):
         """
         mixture = torch.unsqueeze(mixture, 1)  # [M, 1, T]
         mixture_w = F.relu(self.conv1d_U(mixture))  # [M, N, K]
+        if self.d > 0:
+            mixture_w = self.dropout(mixture_w)
         return mixture_w
 
 
