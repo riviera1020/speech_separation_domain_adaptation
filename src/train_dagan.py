@@ -333,7 +333,7 @@ class Trainer(Solver):
             info_dict['d_optim'] = self.d_optim.state_dict()
             info_dict['D_state_dict'] = self.D.state_dict()
 
-            save_crit = sup_score['valid_sisnri']
+            save_crit = uns_score['valid_sisnri']
             self.saver.update(self.G, save_crit, model_name, info_dict)
 
             model_name = 'latest.pth'
