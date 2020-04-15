@@ -35,6 +35,9 @@ def read_scale(path):
         scale = float(scale)
     return scale
 
+def read_path_conf(local_path = './config/path.yaml'):
+    return yaml.load(open(local_path), Loader=yaml.FullLoader)
+
 def inf_data_gen(loader):
     while True:
         for s in loader:

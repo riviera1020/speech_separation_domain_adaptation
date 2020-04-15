@@ -152,6 +152,7 @@ class Tester(Solver):
         result_dict['tr_config'] = self.tr_config
         rname = os.path.join(self.result_dir, 'result.json')
         json.dump(result_dict, open(rname, 'w'), indent = 1)
+        return result_dict
 
     def evaluate(self, loader, dset, dataset, sdr0):
         total_loss = 0.

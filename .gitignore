@@ -11,3 +11,4 @@ src/train.py
 src/preprocess.py
 data/*/mix_sdr/*.json
 /test_*.py
+/result/*

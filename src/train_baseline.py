@@ -278,6 +278,12 @@ class Trainer(Solver):
 
             self.writer.epoch()
 
+        if self.test_after_finished:
+            conf = self.construct_test_conf(dsets = 'all', sdir = 'chapter3', choose_best = False, compute_sdr = False)
+            result = self.run_tester('test_baseline.py', conf)
+            result['tt_config'] = conf
+            self.writer.log_result(result)
+
     def train_one_epoch(self, epoch, tr_loader):
         self.model.train()
         total_loss = 0.

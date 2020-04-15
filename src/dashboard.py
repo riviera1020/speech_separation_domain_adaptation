@@ -88,6 +88,9 @@ class Dashboard:
     def log_epoch(self):
         self.exp.log_other('epoch', self.global_epoch)
 
+    def log_result(self, d):
+        self.exp.log_asset_data(d, 'result.json')
+
     def add_figure(self, fig_name, data):
         self.exp.log_figure(figure_name=fig_name, figure=data, step=self.global_step)
 
