@@ -43,14 +43,16 @@ class ConvTasNet(nn.Module):
         self.mask_nonlinear = config['mask_nonlinear']
         self.dropout = config.get('dropout', 0.0)
         self.enc_dropout = config.get('enc_dropout', 0.0)
+        self.sep_in_dropout = config.get('sep_in_dropout', 0.0)
 
         print(f'Dropout: {self.dropout}')
         print(f'Enc Dropout: {self.enc_dropout}')
+        print(f'Sep Input Dropout: {self.sep_in_dropout}')
 
         # Components
         self.encoder = Encoder(self.L, self.N, dropout = self.enc_dropout)
         self.separator = TemporalConvNet(self.N, self.B, self.H, self.P, self.X, self.R, self.C,
-                self.norm_type, self.causal, self.mask_nonlinear, self.dropout)
+                self.norm_type, self.causal, self.mask_nonlinear, self.dropout, self.sep_in_dropout)
         self.decoder = Decoder(self.N, self.L)
         # init
         for p in self.parameters():
@@ -134,7 +136,7 @@ class Decoder(nn.Module):
 
 class TemporalConvNet(nn.Module):
     def __init__(self, N, B, H, P, X, R, C, norm_type="gLN", causal=False,
-                 mask_nonlinear='relu', dropout = 0.0):
+            mask_nonlinear='relu', dropout = 0.0, sep_in_dropout = 0.0):
         """
         Args:
             N: Number of filters in autoencoder
@@ -180,6 +182,10 @@ class TemporalConvNet(nn.Module):
                                      temporal_conv_net,
                                      mask_conv1x1)
 
+        self.sep_in_d = sep_in_dropout
+        if self.sep_in_d > 0:
+            self.sep_in_dropout = nn.Dropout(self.sep_in_d)
+
     def forward(self, mixture_w):
         """
         Keep this API same with TasNet
@@ -189,6 +195,10 @@ class TemporalConvNet(nn.Module):
             est_mask: [M, C, N, K]
         """
         M, N, K = mixture_w.size()
+
+        if self.sep_in_d > 0:
+            mixture_w = self.sep_in_dropout(mixture_w)
+
         score = self.network(mixture_w)  # [M, N, K] -> [M, C*N, K]
         score = score.view(M, self.C, N, K) # [M, C*N, K] -> [M, C, N, K]
         if self.mask_nonlinear == 'softmax':
