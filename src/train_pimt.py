@@ -386,6 +386,12 @@ class Trainer(Solver):
 
             self.writer.epoch()
 
+        if self.test_after_finished:
+            conf = self.construct_test_conf(dsets = 'all', sdir = 'chapter5', choose_best = False, compute_sdr = False)
+            result = self.run_tester('test_baseline.py', conf)
+            result['tt_config'] = conf
+            self.writer.log_result(result)
+
     def cal_consistency_weight(self, epoch, init_ep=0, end_ep=150, init_w=0.0, end_w=20.0):
         """Sets the weights for the consistency loss"""
         # use step instead

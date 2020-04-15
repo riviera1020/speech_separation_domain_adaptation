@@ -340,6 +340,12 @@ class Trainer(Solver):
             self.saver.force_save(self.G, model_name, info_dict)
             self.writer.epoch()
 
+        if self.test_after_finished:
+            conf = self.construct_test_conf(dsets = 'all', sdir = 'chapter4', choose_best = True, compute_sdr = False)
+            result = self.run_tester('test_dagan.py', conf)
+            result['tt_config'] = conf
+            self.writer.log_result(result)
+
     def train_one_epoch(self, epoch, tr_loader):
         self.G.train()
         total_loss = 0.
