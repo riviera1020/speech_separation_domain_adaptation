@@ -31,6 +31,7 @@ class Tester(Solver):
 
         self.result_dir = config['solver']['result_dir']
         self.safe_mkdir(self.result_dir)
+        self.result_name = config['solver'].get('result_name', 'result.json')
 
         self.checkpoint = config['solver']['checkpoint']
 
@@ -161,13 +162,17 @@ class Tester(Solver):
             result_dict[dset]['tt'] = r_tt
 
         result_dict['tr_config'] = self.tr_config
-        rname = os.path.join(self.result_dir, 'result.json')
+        rname = os.path.join(self.result_dir, self.result_name)
         json.dump(result_dict, open(rname, 'w'), indent = 1)
-
+        return result_dict
 
     def compute_L2(sellf, cf, nf):
         distance = ((cf - nf) ** 2)
         distance = distance.sum().sqrt() / distance.numel()
+        return distance.item()
+
+    def compute_L1(sellf, cf, nf):
+        distance = (cf - nf).abs().mean()
         return distance.item()
 
     def evaluate(self, loader, dset, dataset, sdr0):
@@ -353,6 +358,9 @@ class Tester(Solver):
 
         lkeys = list(range(32)) + [ 'enc' ]
         total_layer_L2_dis = { k: 0. for k in lkeys }
+        total_layer_L1_dis = { k: 0. for k in lkeys }
+        total_layer_clean_mean = { k: 0. for k in lkeys }
+        total_layer_noisy_mean = { k: 0. for k in lkeys }
 
         with torch.no_grad():
             for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
@@ -370,13 +378,6 @@ class Tester(Solver):
 
                 est_clean_source, clean_feat = self.model.dict_forward(clean_mix)
                 est_noisy_source, noisy_feat = self.model.dict_forward(noisy_mix)
-
-                for k in lkeys:
-                    cf = clean_feat[k]
-                    nf = noisy_feat[k]
-
-                    d = self.compute_L2(cf, nf)
-                    total_layer_L2_dis[k] += d
 
                 loss, max_snr, estimate_source, reorder_estimate_source = \
                     cal_loss(padded_source, est_noisy_source, mixture_lengths)
@@ -398,20 +399,20 @@ class Tester(Solver):
                     g = self.g_mapper(uid, dataset)
                     gender_cnt[g] += 1
 
-                    '''
-                    cf = clean_feat[b]
-                    nf = noisy_feat[b]
-                    distance = ((cf - nf) ** 2)
-                    distance = distance.sum().sqrt() / distance.numel()
-                    total_L2_dis += distance.item()
-                    gender_L2_dis[g] += distance.item()
-                    '''
                     for k in lkeys:
                         cf = clean_feat[k][b]
                         nf = noisy_feat[k][b]
+                        l2_d = self.compute_L2(cf, nf)
+                        total_layer_L2_dis[k] += l2_d
 
-                        d = self.compute_L2(cf, nf)
-                        total_layer_L2_dis[k] += d
+                        l1_d = self.compute_L1(cf, nf)
+                        total_layer_L1_dis[k] += l1_d
+
+                        clean_m = cf.mean().item()
+                        total_layer_clean_mean[k] += clean_m
+
+                        noisy_m = nf.mean().item()
+                        total_layer_noisy_mean[k] += noisy_m
 
                     sisnri = cal_SISNRi(src_ref, src_est, mix)
                     total_SISNRi += sisnri
@@ -434,9 +435,14 @@ class Tester(Solver):
 
         for k in total_layer_L2_dis:
             total_layer_L2_dis[k] /= total_cnt
+            total_layer_L1_dis[k] /= total_cnt
+            total_layer_clean_mean[k] /= total_cnt
+            total_layer_noisy_mean[k] /= total_cnt
 
         total_layer_L2_dis = { k:v for k, v in sorted(total_layer_L2_dis.items(), key=lambda item:item[1])}
-        print(total_layer_L2_dis)
+        total_layer_L1_dis = { k:v for k, v in sorted(total_layer_L1_dis.items(), key=lambda item:item[1])}
+        total_layer_clean_mean = { k:v for k, v in sorted(total_layer_clean_mean.items(), key=lambda item:item[1])}
+        total_layer_noisy_mean = { k:v for k, v in sorted(total_layer_noisy_mean.items(), key=lambda item:item[1])}
 
         gender_SDRi = {}
         for g in gender_SISNRi:
@@ -450,7 +456,9 @@ class Tester(Solver):
                 gender_SDRi[g] = 0.
 
         result = { 'total_loss': total_loss, 'total_SDRi': total_SDRi, 'total_SISNRi': total_SISNRi, 'total_L2_dis': total_L2_dis,
-                'gender_SDRi': gender_SDRi, 'gender_SISNRi': gender_SISNRi, 'gender_L2_dis': gender_L2_dis, 'total_layer_L2_dis': total_layer_L2_dis }
+                'gender_SDRi': gender_SDRi, 'gender_SISNRi': gender_SISNRi, 'gender_L2_dis': gender_L2_dis,
+                'total_layer_L2_dis': total_layer_L2_dis, 'total_layer_L1_dis': total_layer_L1_dis,
+                'total_layer_clean_mean': total_layer_clean_mean, 'total_layer_noisy_mean': total_layer_noisy_mean }
         return result
 
 

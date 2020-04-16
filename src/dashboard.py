@@ -28,12 +28,12 @@ class Dashboard:
             self.exp = ExistingExperiment(previous_experiment=exp_key,
                                           auto_output_logging=None,
                                           auto_metric_logging=None,
-                                          display_summary=False,
+                                          display_summary_level=0,
                                           )
         else:
             self.exp = Experiment(auto_output_logging=None,
                                   auto_metric_logging=None,
-                                  display_summary=False,
+                                  display_summary_level=0,
                                   )
             with open(self.expkey_f, 'w') as f:
                 print(self.exp.get_key(), file=f)
@@ -88,8 +88,8 @@ class Dashboard:
     def log_epoch(self):
         self.exp.log_other('epoch', self.global_epoch)
 
-    def log_result(self, d):
-        self.exp.log_asset_data(d, 'result.json')
+    def log_result(self, d, name = 'result.json'):
+        self.exp.log_asset_data(d, name)
 
     def add_figure(self, fig_name, data):
         self.exp.log_figure(figure_name=fig_name, figure=data, step=self.global_step)

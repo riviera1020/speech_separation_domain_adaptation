@@ -30,6 +30,7 @@ class Solver():
         conf['solver']['result_dir'] = rdir
 
         if choose_best:
+            conf['solver']['result_name'] = 'best.json'
             with open(os.path.join(self.save_dir, 'save.log')) as f:
                 line = f.readlines()[0].rstrip()
                 cpath, score = line.split(':')

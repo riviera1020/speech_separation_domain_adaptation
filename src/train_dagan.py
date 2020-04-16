@@ -69,7 +69,6 @@ class Trainer(Solver):
             self.safe_mkdir(self.log_dir)
             self.writer = Dashboard(log_name, config, self.log_dir)
 
-        # TODO, change to epoch-based
         self.epochs = config['solver']['epochs']
         self.start_epoch = config['solver']['start_epoch']
         self.batch_size = config['solver']['batch_size']
@@ -344,7 +343,12 @@ class Trainer(Solver):
             conf = self.construct_test_conf(dsets = 'all', sdir = 'chapter4', choose_best = True, compute_sdr = False)
             result = self.run_tester('test_dagan.py', conf)
             result['tt_config'] = conf
-            self.writer.log_result(result)
+            self.writer.log_result(result, 'best.json')
+
+            conf = self.construct_test_conf(dsets = 'all', sdir = 'chapter4', choose_best = False, compute_sdr = False)
+            result = self.run_tester('test_dagan.py', conf)
+            result['tt_config'] = conf
+            self.writer.log_result(result, 'result.json')
 
     def train_one_epoch(self, epoch, tr_loader):
         self.G.train()
