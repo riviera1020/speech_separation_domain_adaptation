@@ -49,7 +49,7 @@ class ConvTasNet(nn.Module):
         print(f'Dropout: {self.dropout}')
         print(f'Enc Dropout: {self.enc_dropout}')
         print(f'Sep Input Dropout: {self.sep_in_dropout}')
-        print(f'Sep Input Dropout: {self.sep_out_dropout}')
+        print(f'Sep Output Dropout: {self.sep_out_dropout}')
 
         # Components
         self.encoder = Encoder(self.L, self.N, dropout = self.enc_dropout)

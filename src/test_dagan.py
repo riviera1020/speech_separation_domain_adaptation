@@ -4,12 +4,14 @@ import yaml
 import json
 import random
 import datetime
+import numpy as np
 
 import torch
 
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
+import src.cka as cka
 from src.solver import Solver
 from src.utils import DEV, DEBUG, NCOL, read_scale
 from src.conv_tasnet import ConvTasNet
@@ -21,6 +23,11 @@ from src.wham import wham_eval, wham_parallel_eval
 from src.evaluation import cal_SDR, cal_SISNRi
 from src.sep_utils import remove_pad, load_mix_sdr
 from src.gender_mapper import GenderMapper
+
+import sys
+sys.path.append('../svcca')
+import cca_core
+import pwcca
 
 class Tester(Solver):
     def __init__(self, config):
@@ -51,6 +58,9 @@ class Tester(Solver):
 
         self.compute_sdr = config['solver'].get('compute_sdr', True)
         self.g_mapper = GenderMapper()
+
+        self.comp_sim = config['solver'].get('comp_sim', True)
+        self.comp_sim_iter = config['solver'].get('comp_sim_iter', 10)
 
     def load_dset(self, dset):
         # root: wsj0_root, vctk_root, libri_root
@@ -152,9 +162,6 @@ class Tester(Solver):
                 r_cv = self.evaluate(cv_loader, 'cv', dset, sdr0)
                 r_tt = self.evaluate(tt_loader, 'tt', dset, sdr0)
             else:
-                #r_cv = self.evaluate_wham(cv_loader, 'cv', dset, sdr0)
-                #r_tt = self.evaluate_wham(tt_loader, 'tt', dset, sdr0)
-
                 r_cv = self.evaluate_wham_every_layer(cv_loader, 'cv', dset, sdr0)
                 r_tt = self.evaluate_wham_every_layer(tt_loader, 'tt', dset, sdr0)
 
@@ -174,6 +181,22 @@ class Tester(Solver):
     def compute_L1(sellf, cf, nf):
         distance = (cf - nf).abs().mean()
         return distance.item()
+
+    def compute_pwcca(sellf, cf, nf):
+        '''
+        cf: [F, data_points]
+        nf: [F, data_points]
+        '''
+        pw, w, c = pwcca.compute_pwcca(cf, nf, epsilon = 1e-10)
+        return pw
+
+    def compute_cka(sellf, cf, nf):
+        '''
+        cf: [F, data_points]
+        nf: [F, data_points]
+        '''
+        sim = cka.cka(cka.gram_linear(cf.T), cka.gram_linear(nf.T))
+        return sim
 
     def evaluate(self, loader, dset, dataset, sdr0):
         total_loss = 0.
@@ -252,97 +275,6 @@ class Tester(Solver):
                    'gender_SDRi': gender_SDRi, 'gender_SISNRi': gender_SISNRi }
         return result
 
-    def evaluate_wham(self, loader, dset, dataset, sdr0):
-        total_loss = 0.
-        total_SISNRi = 0.
-        total_SDR = 0.
-        total_cnt = 0.
-        total_L2_dis = 0.
-
-        gs = [ 'MM', 'FF', 'MF' ]
-        gender_SISNRi = { g: 0. for g in gs }
-        gender_SDR = { g: 0. for g in gs }
-        gender_L2_dis = { g: 0. for g in gs }
-        gender_cnt = { g: 0. for g in gs }
-
-        with torch.no_grad():
-            for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
-
-                noisy_mix = sample['noisy_mix'].to(DEV)
-                clean_mix = sample['clean_mix'].to(DEV)
-                padded_source = sample['ref'].to(DEV)
-                mixture_lengths = sample['ilens'].to(DEV)
-                uids = sample['uid']
-
-                ml = mixture_lengths.max().item()
-                clean_mix = clean_mix[:, :ml]
-                noisy_mix = noisy_mix[:, :ml]
-                padded_source = padded_source[:, :, :ml]
-
-                est_clean_source, clean_feat = self.model(clean_mix)
-                est_noisy_source, noisy_feat = self.model(noisy_mix)
-
-                loss, max_snr, estimate_source, reorder_estimate_source = \
-                    cal_loss(padded_source, est_noisy_source, mixture_lengths)
-                total_loss += loss.item()
-
-                B = reorder_estimate_source.size(0)
-                total_cnt += B
-
-                noisy_mix = remove_pad(noisy_mix, mixture_lengths)
-                padded_source = remove_pad(padded_source, mixture_lengths)
-                reorder_estimate_source = remove_pad(reorder_estimate_source, mixture_lengths)
-
-                for b in range(B):
-                    mix = noisy_mix[b]
-                    src_ref = padded_source[b]
-                    src_est = reorder_estimate_source[b]
-                    uid = uids[b]
-
-                    g = self.g_mapper(uid, dataset)
-                    gender_cnt[g] += 1
-
-                    cf = clean_feat[b]
-                    nf = noisy_feat[b]
-                    distance = ((cf - nf) ** 2)
-                    distance = distance.sum().sqrt() / distance.numel()
-                    total_L2_dis += distance.item()
-                    gender_L2_dis[g] += distance.item()
-
-                    sisnri = cal_SISNRi(src_ref, src_est, mix)
-                    total_SISNRi += sisnri
-                    gender_SISNRi[g] += sisnri
-
-                    if self.compute_sdr:
-                        sdr = cal_SDR(src_ref, src_est)
-                        total_SDR += sdr
-                        gender_SDR[g] += sdr
-
-        total_loss /= total_cnt
-        total_SISNRi /= total_cnt
-        total_L2_dis /= total_cnt
-
-        if self.compute_sdr:
-            total_SDR /= total_cnt
-            total_SDRi = total_SDR - sdr0[dset]
-        else:
-            total_SDRi = 0
-
-        gender_SDRi = {}
-        for g in gender_SISNRi:
-            gender_SISNRi[g] /= gender_cnt[g]
-            gender_L2_dis[g] /= gender_cnt[g]
-
-            if self.compute_sdr:
-                sdr = gender_SDR[g] / gender_cnt[g]
-                gender_SDRi[g] = sdr - sdr0[f'{dset}_{g}']
-            else:
-                gender_SDRi[g] = 0.
-
-        result = { 'total_loss': total_loss, 'total_SDRi': total_SDRi, 'total_SISNRi': total_SISNRi, 'total_L2_dis': total_L2_dis,
-                   'gender_SDRi': gender_SDRi, 'gender_SISNRi': gender_SISNRi, 'gender_L2_dis': gender_L2_dis }
-        return result
-
     def evaluate_wham_every_layer(self, loader, dset, dataset, sdr0):
         total_loss = 0.
         total_SISNRi = 0.
@@ -359,8 +291,15 @@ class Tester(Solver):
         lkeys = list(range(32)) + [ 'enc' ]
         total_layer_L2_dis = { k: 0. for k in lkeys }
         total_layer_L1_dis = { k: 0. for k in lkeys }
-        total_layer_clean_mean = { k: 0. for k in lkeys }
-        total_layer_noisy_mean = { k: 0. for k in lkeys }
+
+        total_layer_ckas = { k:[] for k in lkeys }
+        total_layer_pwccas = { k:[] for k in lkeys }
+        total_layer_clean_act = { k:[] for k in lkeys }
+        total_layer_noisy_act = { k:[] for k in lkeys }
+        total_layer_cka_mean = { k:0 for k in lkeys }
+        total_layer_cka_std = { k:0 for k in lkeys }
+        total_layer_pwcca_mean = { k:0 for k in lkeys }
+        total_layer_pwcca_std = { k:0 for k in lkeys }
 
         with torch.no_grad():
             for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
@@ -408,11 +347,14 @@ class Tester(Solver):
                         l1_d = self.compute_L1(cf, nf)
                         total_layer_L1_dis[k] += l1_d
 
-                        clean_m = cf.mean().item()
-                        total_layer_clean_mean[k] += clean_m
+                        F, T = cf.size()
 
-                        noisy_m = nf.mean().item()
-                        total_layer_noisy_mean[k] += noisy_m
+                        ridx = torch.randint(0, T, size = (1, self.comp_sim_iter)).to(DEV).expand(F, -1)
+                        cf_select = torch.gather(cf, dim=1, index=ridx)
+                        nf_select = torch.gather(nf, dim=1, index=ridx)
+
+                        total_layer_clean_act[k].append(cf_select.cpu())
+                        total_layer_noisy_act[k].append(nf_select.cpu())
 
                     sisnri = cal_SISNRi(src_ref, src_est, mix)
                     total_SISNRi += sisnri
@@ -433,16 +375,32 @@ class Tester(Solver):
         else:
             total_SDRi = 0
 
-        for k in total_layer_L2_dis:
+        for k in tqdm(lkeys, ncols = NCOL):
+            if not self.comp_sim:
+                break
+
+            # mean L1/L2 distance
             total_layer_L2_dis[k] /= total_cnt
             total_layer_L1_dis[k] /= total_cnt
-            total_layer_clean_mean[k] /= total_cnt
-            total_layer_noisy_mean[k] /= total_cnt
 
-        total_layer_L2_dis = { k:v for k, v in sorted(total_layer_L2_dis.items(), key=lambda item:item[1])}
-        total_layer_L1_dis = { k:v for k, v in sorted(total_layer_L1_dis.items(), key=lambda item:item[1])}
-        total_layer_clean_mean = { k:v for k, v in sorted(total_layer_clean_mean.items(), key=lambda item:item[1])}
-        total_layer_noisy_mean = { k:v for k, v in sorted(total_layer_noisy_mean.items(), key=lambda item:item[1])}
+            # compute cka/cca sim
+            cf_iters = torch.stack(total_layer_clean_act[k], dim = 2).numpy()
+            nf_iters = torch.stack(total_layer_noisy_act[k], dim = 2).numpy()
+
+            for it in range(self.comp_sim_iter):
+                cf = cf_iters[:, it, :]
+                nf = nf_iters[:, it, :]
+
+                cka_sim = self.compute_cka(cf, nf)
+                total_layer_ckas[k].append(cka_sim)
+
+                pwcca_sim = self.compute_pwcca(cf, nf)
+                total_layer_pwccas[k].append(pwcca_sim)
+
+            total_layer_cka_mean[k] = float(np.mean(total_layer_ckas[k]))
+            total_layer_pwcca_mean[k] = float(np.mean(total_layer_pwccas[k]))
+            total_layer_cka_std[k] = float(np.std(total_layer_ckas[k]))
+            total_layer_pwcca_std[k] = float(np.std(total_layer_pwccas[k]))
 
         gender_SDRi = {}
         for g in gender_SISNRi:
@@ -458,7 +416,7 @@ class Tester(Solver):
         result = { 'total_loss': total_loss, 'total_SDRi': total_SDRi, 'total_SISNRi': total_SISNRi, 'total_L2_dis': total_L2_dis,
                 'gender_SDRi': gender_SDRi, 'gender_SISNRi': gender_SISNRi, 'gender_L2_dis': gender_L2_dis,
                 'total_layer_L2_dis': total_layer_L2_dis, 'total_layer_L1_dis': total_layer_L1_dis,
-                'total_layer_clean_mean': total_layer_clean_mean, 'total_layer_noisy_mean': total_layer_noisy_mean }
+                'total_layer_cka': total_layer_cka_mean, 'total_layer_pwcca': total_layer_pwcca_mean,
+                'total_layer_cka_std': total_layer_cka_std, 'total_layer_pwcca_std': total_layer_pwcca_std }
+
         return result
-
-
