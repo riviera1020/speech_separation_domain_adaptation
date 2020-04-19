@@ -133,7 +133,8 @@ class Trainer(Solver):
         tr_loader = DataLoader(trainset,
                 batch_size = self.batch_size,
                 shuffle = True,
-                num_workers = self.num_workers)
+                num_workers = self.num_workers,
+                drop_last = True)
         return tr_loader
 
     def load_cv_dset(self, dset):
@@ -172,7 +173,8 @@ class Trainer(Solver):
             tr_loader = DataLoader(trainset,
                     batch_size = self.batch_size,
                     shuffle = True,
-                    num_workers = self.num_workers)
+                    num_workers = self.num_workers,
+                    drop_last = True)
             return tr_loader
         else:
             devset = wham_eval(cv_list,
