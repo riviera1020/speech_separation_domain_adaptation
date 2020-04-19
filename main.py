@@ -73,7 +73,7 @@ if __name__ == '__main__':
     elif mode == 'debug':
         from src.train_debug import Trainer as Solver
     elif mode == 'freeze':
-        from src.train_freeze import Trainer as Solver
+        from src.train_newfrz import Trainer as Solver
     elif mode == 'perturb':
         from src.train_perturb import Trainer as Solver
     elif mode == 'augm':
