@@ -79,6 +79,10 @@ class Trainer(Solver):
         self.num_workers = config['solver']['num_workers']
         self.save_freq = config['solver'].get('save_freq', -1)
 
+        # L2/L1 reg only on weight
+        self.L1_reg_w = config['solver'].get('L1_reg_w', 0)
+        self.L2_reg_w = config['solver'].get('L2_reg_w', 0)
+
         self.step = 0
         self.valid_times = 0
 
@@ -284,6 +288,23 @@ class Trainer(Solver):
             result['tt_config'] = conf
             self.writer.log_result(result)
 
+    def compute_w_reg(self, rtype):
+        def L2_norm(p):
+            return p.norm(2)
+        def L1_norm(p):
+            return p.abs().sum()
+
+        if rtype == 'L2':
+            norm_fc = L2_norm
+        else:
+            norm_fc = L1_norm
+
+        reg = 0
+        for name, p in self.model.named_parameters():
+            if 'weight' in name:
+                reg = reg + norm_fc(p)
+        return reg
+
     def train_one_epoch(self, epoch, tr_loader):
         self.model.train()
         total_loss = 0.
@@ -300,6 +321,13 @@ class Trainer(Solver):
 
             loss, max_snr, estimate_source, reorder_estimate_source = \
                 cal_loss(padded_source, estimate_source, mixture_lengths)
+
+            if self.L2_reg_w > 0:
+                l2_reg = self.compute_w_reg('L2')
+                loss = loss + self.L2_reg_w * l2_reg
+            elif self.L1_reg_w > 0:
+                l1_reg = self.compute_w_reg('L1')
+                loss = loss + self.L1_reg_w * l1_reg
 
             self.opt.zero_grad()
             loss.backward()
