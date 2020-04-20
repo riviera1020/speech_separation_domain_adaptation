@@ -7,7 +7,6 @@ import datetime
 import torch
 
 from tqdm import tqdm
-from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 
 from src.solver import Solver
