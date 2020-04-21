@@ -7,6 +7,7 @@ import datetime
 import numpy as np
 
 import torch
+import torch.nn.functional as F
 
 from tqdm import tqdm
 from torch.utils.data import DataLoader
@@ -173,16 +174,24 @@ class Tester(Solver):
         json.dump(result_dict, open(rname, 'w'), indent = 1)
         return result_dict
 
-    def compute_L2(sellf, cf, nf):
+    def compute_L2(self, cf, nf):
         distance = ((cf - nf) ** 2)
         distance = distance.sum().sqrt() / distance.numel()
         return distance.item()
 
-    def compute_L1(sellf, cf, nf):
+    def compute_L1(self, cf, nf):
         distance = (cf - nf).abs().mean()
         return distance.item()
 
-    def compute_pwcca(sellf, cf, nf):
+    def compute_svcca(self, cf, nf):
+        '''
+        cf: [F, data_points]
+        nf: [F, data_points]
+        '''
+        sim = cca_core.svcca(cf, nf, keep_dims = 20)
+        return sim
+
+    def compute_pwcca(self, cf, nf):
         '''
         cf: [F, data_points]
         nf: [F, data_points]
@@ -190,12 +199,25 @@ class Tester(Solver):
         pw, w, c = pwcca.compute_pwcca(cf, nf, epsilon = 1e-10)
         return pw
 
-    def compute_cka(sellf, cf, nf):
+    def compute_cka(self, cf, nf):
         '''
         cf: [F, data_points]
         nf: [F, data_points]
         '''
         sim = cka.cka(cka.gram_linear(cf.T), cka.gram_linear(nf.T))
+        return sim
+
+    def compute_cca(self, cf, nf):
+        sim = cka.cca(cka.cca(cf.T), cka.cca(nf.T))
+        return sim
+
+    def compute_cos_sim(self, cf, nf):
+        '''
+        cf: [F, T]
+        nf: [F, T]
+        '''
+        sim = F.cosine_similarity(cf, nf, dim = 0)
+        sim = sim.mean().item()
         return sim
 
     def evaluate(self, loader, dset, dataset, sdr0):
@@ -291,6 +313,7 @@ class Tester(Solver):
         lkeys = list(range(32)) + [ 'enc' ]
         total_layer_L2_dis = { k: 0. for k in lkeys }
         total_layer_L1_dis = { k: 0. for k in lkeys }
+        total_layer_cos_sim = { k: 0. for k in lkeys }
 
         total_layer_ckas = { k:[] for k in lkeys }
         total_layer_pwccas = { k:[] for k in lkeys }
@@ -356,6 +379,8 @@ class Tester(Solver):
                         total_layer_clean_act[k].append(cf_select.cpu())
                         total_layer_noisy_act[k].append(nf_select.cpu())
 
+                        total_layer_cos_sim[k] += self.compute_cos_sim(cf, nf)
+
                     sisnri = cal_SISNRi(src_ref, src_est, mix)
                     total_SISNRi += sisnri
                     gender_SISNRi[g] += sisnri
@@ -379,9 +404,10 @@ class Tester(Solver):
             if not self.comp_sim:
                 break
 
-            # mean L1/L2 distance
+            # mean L1/L2 distance, cos sim
             total_layer_L2_dis[k] /= total_cnt
             total_layer_L1_dis[k] /= total_cnt
+            total_layer_cos_sim[k] /= total_cnt
 
             # compute cka/cca sim
             cf_iters = torch.stack(total_layer_clean_act[k], dim = 2).numpy()
@@ -391,15 +417,15 @@ class Tester(Solver):
                 cf = cf_iters[:, it, :]
                 nf = nf_iters[:, it, :]
 
-                cka_sim = self.compute_cka(cf, nf)
-                total_layer_ckas[k].append(cka_sim)
+                #cka_sim = self.compute_cka(cf, nf)
+                #total_layer_ckas[k].append(cka_sim)
 
                 pwcca_sim = self.compute_pwcca(cf, nf)
                 total_layer_pwccas[k].append(pwcca_sim)
 
-            total_layer_cka_mean[k] = float(np.mean(total_layer_ckas[k]))
+            #total_layer_cka_mean[k] = float(np.mean(total_layer_ckas[k]))
             total_layer_pwcca_mean[k] = float(np.mean(total_layer_pwccas[k]))
-            total_layer_cka_std[k] = float(np.std(total_layer_ckas[k]))
+            #total_layer_cka_std[k] = float(np.std(total_layer_ckas[k]))
             total_layer_pwcca_std[k] = float(np.std(total_layer_pwccas[k]))
 
         gender_SDRi = {}
@@ -415,8 +441,7 @@ class Tester(Solver):
 
         result = { 'total_loss': total_loss, 'total_SDRi': total_SDRi, 'total_SISNRi': total_SISNRi, 'total_L2_dis': total_L2_dis,
                 'gender_SDRi': gender_SDRi, 'gender_SISNRi': gender_SISNRi, 'gender_L2_dis': gender_L2_dis,
-                'total_layer_L2_dis': total_layer_L2_dis, 'total_layer_L1_dis': total_layer_L1_dis,
-                'total_layer_cka': total_layer_cka_mean, 'total_layer_pwcca': total_layer_pwcca_mean,
-                'total_layer_cka_std': total_layer_cka_std, 'total_layer_pwcca_std': total_layer_pwcca_std }
+                'total_layer_L2_dis': total_layer_L2_dis, 'total_layer_L1_dis': total_layer_L1_dis, 'total_layer_cos_sim': total_layer_cos_sim,
+                'total_layer_pwcca': total_layer_pwcca_mean, 'total_layer_pwcca_std': total_layer_pwcca_std }
 
         return result

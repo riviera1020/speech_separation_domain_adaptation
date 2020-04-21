@@ -43,7 +43,7 @@ class Tester(Solver):
         state_dict = save_dict['state_dict']
         self.set_model(state_dict)
 
-        self.compute_sdr = config['solver'].get('compute_sdr', True)
+        self.compute_sdr = config['solver'].get('compute_sdr', False)
         self.g_mapper = GenderMapper()
 
     def load_dset(self, dset):
