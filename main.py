@@ -86,6 +86,12 @@ if __name__ == '__main__':
         from src.train_mcd import Trainer as Solver
     elif mode == 'limit':
         from src.train_limit import Trainer as Solver
+    elif mode == 'cluster':
+        if not args.test:
+            print('Not imp')
+            exit()
+        else:
+            from src.test_cluster import Tester as Solver
     else:
         print('Not imp')
         exit()

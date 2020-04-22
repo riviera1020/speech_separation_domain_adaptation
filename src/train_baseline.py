@@ -13,6 +13,7 @@ from src.solver import Solver
 from src.saver import Saver
 from src.utils import DEV, DEBUG, NCOL, read_scale
 from src.conv_tasnet import ConvTasNet
+from src.slim_conv_tasnet import MyConvTasNet
 from src.dprnn import DualRNN
 from src.adanet import ADANet
 from src.pit_criterion import cal_loss, SISNR
@@ -178,6 +179,8 @@ class Trainer(Solver):
         self.model_type = self.config['model'].get('type', 'convtasnet')
         if self.model_type == 'adanet':
             self.model = ADANet(self.config['model']).to(DEV)
+        elif self.model_type == 'slim':
+            self.model = MyConvTasNet(self.config['model']).to(DEV)
         else:
             self.model = ConvTasNet(self.config['model']).to(DEV)
 
