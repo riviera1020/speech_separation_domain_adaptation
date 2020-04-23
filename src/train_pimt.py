@@ -119,8 +119,7 @@ class Trainer(Solver):
             self.lambda_scheduler = self.set_scheduler(self.ns_conf['scheduler'])
 
         input_transform = config['solver'].get('input_transform', None)
-        if input_transform != None:
-            self.set_transform(input_transform)
+        self.set_transform(input_transform)
 
         self.step = 0
         self.valid_times = 0
@@ -135,7 +134,10 @@ class Trainer(Solver):
         self.writer.add_tag(self.script_name)
 
     def set_transform(self, t_conf):
-        self.transform = InputTransform(t_conf)
+        if t_conf == None:
+            self.transform = None
+        else:
+            self.transform = InputTransform(t_conf)
 
     def set_scheduler(self, sch_config):
         if sch_config['function'] == 'ramp':
@@ -434,7 +436,9 @@ class Trainer(Solver):
 
             # pi on sup
             with torch.no_grad():
+                self.model.eval()
                 estimate_clean_sup, feat_clean_sup = self.model.fetch_forward(padded_mixture, self.locs)
+                self.model.train()
             estimate_noise_sup, feat_noise_sup = self.model.fetch_forward(padded_mixture, self.locs, self.transform)
             loss_pi_sup = self.con_loss(estimate_clean_sup, estimate_noise_sup, mixture_lengths, feat_clean_sup, feat_noise_sup)
 
@@ -444,7 +448,9 @@ class Trainer(Solver):
             mixture_lengths = uns_sample['ilens'].to(DEV)
 
             with torch.no_grad():
+                self.model.eval()
                 estimate_clean_uns, feat_clean_uns = self.model.fetch_forward(padded_mixture, self.locs)
+                self.model.train()
             estimate_noise_uns, feat_noise_uns = self.model.fetch_forward(padded_mixture, self.locs, self.transform)
             loss_pi_uns = self.con_loss(estimate_clean_uns, estimate_noise_uns, mixture_lengths, feat_clean_uns, feat_noise_uns)
 

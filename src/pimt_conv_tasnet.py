@@ -65,9 +65,12 @@ class InputTransform(nn.Module):
 
 class Separator(TemporalConvNet):
     def __init__(self, N, B, H, P, X, R, C, norm_type="gLN", causal=False,
-                 mask_nonlinear='relu', dropout = 0.0):
+                 mask_nonlinear='relu', dropout = 0.0, sep_in_dropout = 0.0, sep_out_dropout = 0.0):
         super(Separator, self).__init__(N, B, H, P, X, R, C,
-                norm_type, causal, mask_nonlinear, dropout)
+                norm_type, causal, mask_nonlinear, dropout, sep_in_dropout, sep_out_dropout)
+
+        self.sep_in_dropout = nn.Dropout(self.sep_in_d)
+        self.sep_out_dropout = nn.Dropout(self.sep_out_d)
 
     def forward(self, mixture_w):
         """
@@ -78,7 +81,13 @@ class Separator(TemporalConvNet):
             est_mask: [M, C, N, K]
         """
         M, N, K = mixture_w.size()
-        score = self.network(mixture_w)  # [M, N, K] -> [M, C*N, K]
+
+        score = self.sep_in_dropout(mixture_w)
+        for i, l in enumerate(self.network):
+            score = l(score)
+            if i == 2:
+                score = self.sep_out_dropout(score)
+
         score = score.view(M, self.C, N, K) # [M, C*N, K] -> [M, C, N, K]
         if self.mask_nonlinear == 'softmax':
             est_mask = F.softmax(score, dim=1)
@@ -94,7 +103,7 @@ class PiMtConvTasNet(ConvTasNet):
 
         del self.separator
         self.separator = Separator(self.N, self.B, self.H, self.P, self.X, self.R, self.C,
-                self.norm_type, self.causal, self.mask_nonlinear, self.dropout)
+                self.norm_type, self.causal, self.mask_nonlinear, self.dropout, self.sep_in_dropout, self.sep_out_dropout)
         # init
         for p in self.parameters():
             if p.dim() > 1:
