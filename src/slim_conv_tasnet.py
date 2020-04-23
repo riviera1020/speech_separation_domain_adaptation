@@ -123,7 +123,7 @@ class TemporalConvNet(nn.Module):
         temporal_conv_net = nn.Sequential(*repeats)
         # [M, B, K] -> [M, C*N, K]
         mask_conv1x1 = nn.Conv1d(B, preC*N, 1, bias=False)
-        self.pred = nn.Linear(preC, C)
+        self.pred = nn.Linear(preC, C, bias=False)
         # Put together
         self.network = nn.Sequential(layer_norm,
                                      bottleneck_conv1x1,
