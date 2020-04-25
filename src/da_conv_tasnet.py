@@ -91,7 +91,7 @@ class DAConvTasNet(nn.Module):
 
         return est_source, feature
 
-    def dict_forward(self, mixture):
+    def dict_forward(self, mixture, consider_mask = False):
         """
         Args:
             mixture: [M, T], M is batch size, T is #samples
@@ -100,7 +100,10 @@ class DAConvTasNet(nn.Module):
         """
         mixture_w = self.encoder(mixture)
         est_mask, feature = self.separator.dict_forward(mixture_w)
+
         feature['enc'] = mixture_w
+        if consider_mask:
+            feature['mask'] = est_mask
 
         est_source = self.decoder(mixture_w, est_mask)
 
@@ -110,6 +113,30 @@ class DAConvTasNet(nn.Module):
         est_source = F.pad(est_source, (0, T_origin - T_conv))
 
         return est_source, feature
+
+    def IDM_forward(self, mixture, ref):
+        mixture_w = self.encoder(mixture)
+
+
+        s1_spec = self.encoder(ref[:, 0, :])
+        s2_spec = self.encoder(ref[:, 1, :])
+
+        s1_mask = s1_spec / ( s1_spec + s2_spec + 1e-8 )
+        s2_mask = s2_spec / ( s1_spec + s2_spec + 1e-8 )
+        idm = torch.stack([s1_mask, s2_mask], dim = 1)
+
+        est_mask, feature = self.separator.dict_forward(mixture_w)
+        feature['enc'] = mixture_w
+        feature['mask'] = est_mask
+
+        est_source = self.decoder(mixture_w, idm)
+
+        # T changed after conv1d in encoder, fix it here
+        T_origin = mixture.size(-1)
+        T_conv = est_source.size(-1)
+        est_source = F.pad(est_source, (0, T_origin - T_conv))
+
+        return est_source, feature, idm
 
 class TemporalConvNet(nn.Module):
     def __init__(self, N, B, H, P, X, R, C, norm_type="gLN", causal=False,

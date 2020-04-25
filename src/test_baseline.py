@@ -13,6 +13,7 @@ from src.solver import Solver
 from src.utils import DEV, DEBUG, NCOL, read_scale
 from src.conv_tasnet import ConvTasNet
 from src.adanet import ADANet
+from src.slim_conv_tasnet import MyConvTasNet
 from src.pit_criterion import cal_loss
 from src.dataset import wsj0_eval
 from src.wham import wham_eval
@@ -110,6 +111,8 @@ class Tester(Solver):
         model_type = self.tr_config['model'].get('type', 'convtasnet')
         if model_type == 'adanet':
             self.model = ADANet(self.tr_config['model']).to(DEV)
+        elif model_type == 'slim':
+            self.model = MyConvTasNet(self.tr_config['model']).to(DEV)
         else:
             self.model = ConvTasNet(self.tr_config['model']).to(DEV)
         self.model.load_state_dict(state_dict)
