@@ -56,14 +56,19 @@ class DAConvTasNet(nn.Module):
         self.mask_nonlinear = config['mask_nonlinear']
         self.locs = config.get('locs', [(self.R-1, self.X-1)])
         self.consider_enc = config.get('consider_enc', False)
-        self.feature_dim = len(self.locs) * self.B
+
+        self.feat_loc = config.get('feat_loc', 'residual')
+        assert self.feat_loc in [ 'residual', 'conv1x1', 'dsconv' ]
+
+        f_dim = self.H if self.feat_loc == 'conv1x1' else self.B
+        self.feature_dim = len(self.locs) * f_dim
         if self.consider_enc:
             self.feature_dim += self.N
 
         # Components
         self.encoder = Encoder(self.L, self.N)
         self.separator = TemporalConvNet(self.N, self.B, self.H, self.P, self.X, self.R, self.C,
-                self.norm_type, self.causal, self.mask_nonlinear, locs = self.locs)
+                self.norm_type, self.causal, self.mask_nonlinear, locs = self.locs, feat_loc = self.feat_loc)
         self.decoder = Decoder(self.N, self.L)
 
         # init
@@ -140,7 +145,7 @@ class DAConvTasNet(nn.Module):
 
 class TemporalConvNet(nn.Module):
     def __init__(self, N, B, H, P, X, R, C, norm_type="gLN", causal=False,
-                 mask_nonlinear='relu', locs = None):
+                 mask_nonlinear='relu', locs = None, feat_loc = 'residual'):
         """
         Args:
             N: Number of filters in autoencoder
@@ -176,7 +181,8 @@ class TemporalConvNet(nn.Module):
                                          padding=padding,
                                          dilation=dilation,
                                          norm_type=norm_type,
-                                         causal=causal)]
+                                         causal=causal,
+                                         feat_loc=feat_loc)]
             repeats += [nn.Sequential(*blocks)]
         temporal_conv_net = nn.Sequential(*repeats)
         # [M, B, K] -> [M, C*N, K]
