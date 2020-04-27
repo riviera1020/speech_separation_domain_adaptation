@@ -92,6 +92,12 @@ if __name__ == '__main__':
             exit()
         else:
             from src.test_cluster import Tester as Solver
+    elif mode == 'dacluster':
+        if not args.test:
+            print('Not imp')
+            exit()
+        else:
+            from src.test_dacluster import Tester as Solver
     else:
         print('Not imp')
         exit()

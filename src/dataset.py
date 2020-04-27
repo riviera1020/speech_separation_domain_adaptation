@@ -252,6 +252,35 @@ class wsj0_eval(Dataset):
                    'mix': mix_audio, 'ref': sep_audio }
         return sample
 
+    def get_sample_by_uid(self, uid):
+        mix_path = os.path.join(self.audio_root, self.data[uid]['mix'][0])
+        s1_path = os.path.join(self.audio_root, self.data[uid]['s1'][0])
+        s2_path = os.path.join(self.audio_root, self.data[uid]['s2'][0])
+
+        mix_audio, _ = sf.read(mix_path)
+        s1_audio, _ = sf.read(s1_path)
+        s2_audio, _ = sf.read(s2_path)
+
+        mix_audio = mix_audio.astype(np.float32)
+        s1_audio = s1_audio.astype(np.float32)
+        s2_audio = s2_audio.astype(np.float32)
+
+        ilen = len(mix_audio)
+        if ilen < self.maxlen:
+            mix_audio = self.pad_audio(mix_audio, ilen)
+            s1_audio = self.pad_audio(s1_audio, ilen)
+            s2_audio = self.pad_audio(s2_audio, ilen)
+
+        sep_audio = np.stack([s1_audio, s2_audio], axis = 0)
+
+        mix_audio = torch.FloatTensor([mix_audio])
+        sep_audio = torch.FloatTensor([sep_audio])
+        ilen = torch.LongTensor([ilen])
+
+        sample = { 'uid': uid, 'ilens': ilen,
+                   'mix': mix_audio, 'ref': sep_audio }
+        return sample
+
 if __name__ == '__main__':
 
     from torch.utils.data import DataLoader
