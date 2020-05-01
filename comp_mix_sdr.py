@@ -159,9 +159,9 @@ def main(dset, audio_root, data_root, dump_all = False):
     dump_result(total_sdr, result, out_dir, prefix = 'tt', dump_all = dump_all)
 
 # change here
-dset = 'libri'
-audio_root = '/home/riviera1020/Big/Corpus/libri-mix/wav8k/min/'
-data_root = './data/libri/'
+dset = 'wsj0-vctk'
+audio_root = '/home/riviera1020/Big/Corpus/wsj0-vctk/wav8k/min/'
+data_root = './data/wsj0-vctk/'
 dump_all = True
 
 main(dset, audio_root, data_root, dump_all)

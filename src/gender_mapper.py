@@ -8,6 +8,14 @@ def get_sep_uid(uid, dataset):
         s11, s12, _, s21, s22, _ = uid[:-4].split('_')
         s1 = f'{s11}_{s12}'
         s2 = f'{s21}_{s22}'
+    elif dataset == 'wsj0-vctk':
+        w1, w2, w3, w4, w5 = uid[:-4].split('_')
+        if w1[0] == 'p':
+            s1 = f'{w1}_{w2}'
+            s2 = w4
+        else:
+            s1 = w1
+            s2 = f'{w3}_{w4}'
     return s1, s2
 
 def get_spk(uid, dataset):
@@ -17,12 +25,17 @@ def get_spk(uid, dataset):
         return uid.split('_')[0]
     elif dataset == 'libri':
         return uid.split('-')[0]
+    elif dataset == 'wsj0-vctk':
+        if uid[0] == 'p':
+            return uid.split('_')[0]
+        else:
+            return uid[:3]
 
 class GenderMapper():
     def __init__(self):
 
         # all dsets
-        self.dsets = [ 'wsj0', 'vctk', 'libri' ]
+        self.dsets = [ 'wsj0', 'vctk', 'libri', 'wsj0-vctk' ]
         #['wham', 'wham-easy' ]
 
         self.info = {}
@@ -53,7 +66,8 @@ if __name__ == '__main__':
     m = GenderMapper()
 
     splts = ['cv', 'tt']
-    dsets = [ 'wsj0', 'vctk', 'libri' ]
+    #dsets = [ 'wsj0', 'vctk', 'libri' ]
+    dsets = [ 'wsj0-vctk']
 
     for dset in dsets:
         for splt in splts:
