@@ -131,9 +131,9 @@ def comp_oneset(loader, dset):
 
 def dump_result(total_sdr, result, out_dir, prefix, dump_all = False):
 
-    #sdr_name = os.path.join(out_dir, prefix)
-    #with open(sdr_name, 'w') as f:
-    #    f.write(str(total_sdr))
+    sdr_name = os.path.join(out_dir, prefix)
+    with open(sdr_name, 'w') as f:
+        f.write(str(total_sdr))
 
     gender_sdr = result['gender']
     for g, sdr0 in gender_sdr.items():
