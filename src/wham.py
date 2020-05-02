@@ -282,16 +282,22 @@ class wham_eval(Dataset):
         mix_path = os.path.join(self.audio_root, self.data[uid]['mix'][0])
         s1_path = os.path.join(self.audio_root, self.data[uid]['s1'][0])
         s2_path = os.path.join(self.audio_root, self.data[uid]['s2'][0])
+        npath, _, ss, sn, _ = self.noise_data[uid]['noise']
+        noise_path = os.path.join(self.audio_root, npath)
 
-        mix_audio, _ = sf.read(mix_path)
-        s1_audio, _ = sf.read(s1_path)
-        s2_audio, _ = sf.read(s2_path)
+        mix_audio = self.load_audio(mix_path, ss)
+        s1_audio = self.load_audio(s1_path, ss)
+        s2_audio = self.load_audio(s2_path, ss)
+        noise_audio = self.load_audio(noise_path, sn)
 
         mix_audio = mix_audio.astype(np.float32)
         s1_audio = s1_audio.astype(np.float32)
         s2_audio = s2_audio.astype(np.float32)
+        noise_audio = noise_audio.astype(np.float32)
 
         ilen = len(mix_audio)
+        noise_audio = noise_audio[:ilen]
+        mix_audio = mix_audio + self.scale * noise_audio
         if ilen < self.maxlen:
             mix_audio = self.pad_audio(mix_audio, ilen)
             s1_audio = self.pad_audio(s1_audio, ilen)
