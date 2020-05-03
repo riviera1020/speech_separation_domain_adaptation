@@ -401,13 +401,13 @@ class Tester(Solver):
             total_SDRi = 0
 
         for k in tqdm(lkeys, ncols = NCOL):
-            if not self.comp_sim:
-                break
-
             # mean L1/L2 distance, cos sim
             total_layer_L2_dis[k] /= total_cnt
             total_layer_L1_dis[k] /= total_cnt
             total_layer_cos_sim[k] /= total_cnt
+
+            if not self.comp_sim:
+                break
 
             # compute cka/cca sim
             cf_iters = torch.stack(total_layer_clean_act[k], dim = 2).numpy()
@@ -417,15 +417,15 @@ class Tester(Solver):
                 cf = cf_iters[:, it, :]
                 nf = nf_iters[:, it, :]
 
-                #cka_sim = self.compute_cka(cf, nf)
-                #total_layer_ckas[k].append(cka_sim)
+                cka_sim = self.compute_cka(cf, nf)
+                total_layer_ckas[k].append(cka_sim)
 
                 pwcca_sim = self.compute_pwcca(cf, nf)
                 total_layer_pwccas[k].append(pwcca_sim)
 
-            #total_layer_cka_mean[k] = float(np.mean(total_layer_ckas[k]))
+            total_layer_cka_mean[k] = float(np.mean(total_layer_ckas[k]))
             total_layer_pwcca_mean[k] = float(np.mean(total_layer_pwccas[k]))
-            #total_layer_cka_std[k] = float(np.std(total_layer_ckas[k]))
+            total_layer_cka_std[k] = float(np.std(total_layer_ckas[k]))
             total_layer_pwcca_std[k] = float(np.std(total_layer_pwccas[k]))
 
         gender_SDRi = {}
@@ -442,6 +442,7 @@ class Tester(Solver):
         result = { 'total_loss': total_loss, 'total_SDRi': total_SDRi, 'total_SISNRi': total_SISNRi, 'total_L2_dis': total_L2_dis,
                 'gender_SDRi': gender_SDRi, 'gender_SISNRi': gender_SISNRi, 'gender_L2_dis': gender_L2_dis,
                 'total_layer_L2_dis': total_layer_L2_dis, 'total_layer_L1_dis': total_layer_L1_dis, 'total_layer_cos_sim': total_layer_cos_sim,
-                'total_layer_pwcca': total_layer_pwcca_mean, 'total_layer_pwcca_std': total_layer_pwcca_std }
+                'total_layer_pwcca': total_layer_pwcca_mean, 'total_layer_pwcca_std': total_layer_pwcca_std,
+                'total_layer_cka': total_layer_cka_mean, 'total_layer_cka_std': total_layer_cka_std }
 
         return result
