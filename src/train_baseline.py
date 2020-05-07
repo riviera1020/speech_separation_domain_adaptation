@@ -19,10 +19,12 @@ from src.adanet import ADANet
 from src.pit_criterion import cal_loss, SISNR
 from src.dataset import wsj0, wsj0_eval
 from src.wham import wham, wham_eval
+from src.gender_dset import wsj0_gender
 from src.ranger import Ranger
 from src.evaluation import cal_SDR, cal_SISNRi, cal_SISNR
 from src.sep_utils import remove_pad, load_mix_sdr
 from src.dashboard import Dashboard
+from src.gender_mapper import GenderMapper
 
 """
 from src.scheduler import FlatCosineLR, CosineWarmupLR
@@ -87,6 +89,8 @@ class Trainer(Solver):
         self.step = 0
         self.valid_times = 0
 
+        self.gender = config['data'].get('gender', 'all')
+        self.gender_mapper = GenderMapper()
         self.load_data()
         self.set_model()
 
@@ -121,13 +125,22 @@ class Trainer(Solver):
 
         sp_factors = self.config['solver'].get('sp_factors', None)
 
-        trainset = wsj0(tr_list,
-                audio_root = audio_root,
-                seg_len = seg_len,
-                pre_load = False,
-                one_chunk_in_utt = True,
-                mode = 'tr',
-                sp_factors = sp_factors)
+        if dset == 'wsj0' and self.gender != 'all':
+            trainset = wsj0_gender(tr_list,
+                    audio_root = audio_root,
+                    seg_len = seg_len,
+                    pre_load = False,
+                    one_chunk_in_utt = True,
+                    mode = 'tr',
+                    gender = self.gender)
+        else:
+            trainset = wsj0(tr_list,
+                    audio_root = audio_root,
+                    seg_len = seg_len,
+                    pre_load = False,
+                    one_chunk_in_utt = True,
+                    mode = 'tr',
+                    sp_factors = sp_factors)
         tr_loader = DataLoader(trainset,
                 batch_size = self.batch_size,
                 shuffle = True,
@@ -276,12 +289,12 @@ class Trainer(Solver):
                 force_save = True
             else:
                 force_save = False
-            self.valid(self.dsets[self.dset]['cv'], epoch, prefix = self.dset, force_save = force_save)
+            self.valid(self.dsets[self.dset]['cv'], self.dset, epoch, prefix = self.dset, force_save = force_save)
 
             # Valid not training dataset
             for dset in self.dsets:
                 if dset != self.dset:
-                    self.valid(self.dsets[dset]['cv'], epoch, no_save = True, prefix = dset)
+                    self.valid(self.dsets[dset]['cv'], dset, epoch, no_save = True, prefix = dset)
 
             self.writer.epoch()
 
@@ -357,11 +370,15 @@ class Trainer(Solver):
                  'epoch_sisnri': total_sisnri }
         self.writer.log_epoch_info('train', meta)
 
-    def valid(self, loader, epoch, no_save = False, prefix = "", force_save = False):
+    def valid(self, loader, dset, epoch, no_save = False, prefix = "", force_save = False):
         self.model.eval()
         total_loss = 0.
         total_sisnri = 0.
         cnt = 0
+
+        genders = [ 'MF', 'MM', 'FF' ]
+        gender_sisnri = { 'MF': 0., 'FF': 0., 'MM': 0, }
+        gender_cnt = { 'MF': 0., 'FF': 0., 'MM': 0, }
 
         with torch.no_grad():
             for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
@@ -369,6 +386,7 @@ class Trainer(Solver):
                 padded_mixture = sample['mix'].to(DEV)
                 padded_source = sample['ref'].to(DEV)
                 mixture_lengths = sample['ilens'].to(DEV)
+                uids = sample['uid']
 
                 ml = mixture_lengths.max().item()
                 padded_mixture = padded_mixture[:, :ml]
@@ -387,11 +405,21 @@ class Trainer(Solver):
                 total_sisnri += max_sisnri.sum().item()
                 cnt += B
 
+                for b in range(B):
+                    g = self.gender_mapper(uids[b], dset)
+                    gender_sisnri[g] += max_sisnri[b].item()
+                    gender_cnt[g] += 1
+
         total_sisnri = total_sisnri / cnt
         total_loss = total_loss / cnt
 
         meta = { f'{prefix}_epoch_loss': total_loss,
                  f'{prefix}_epoch_sisnri': total_sisnri }
+
+        for g in genders:
+            gs = gender_sisnri[g] / gender_cnt[g]
+            meta[f'{prefix}_epoch_{g}_sisnri'] = gs
+
         self.writer.log_epoch_info('valid', meta)
 
         valid_score = {}

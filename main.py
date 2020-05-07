@@ -66,6 +66,8 @@ if __name__ == '__main__':
             from src.train_dagan import Trainer as Solver
         else:
             from src.test_dagan import Tester as Solver
+    elif mode == 'dagan_pl':
+        from src.train_dagan_pl import Trainer as Solver
     elif mode == 'mmd':
         from src.train_mmd import Trainer as Solver
     elif mode == 'pimt':
