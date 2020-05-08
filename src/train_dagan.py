@@ -21,10 +21,12 @@ from src.domain_cls import DomainClassifier
 from src.pit_criterion import cal_loss, SISNR
 from src.dataset import wsj0, wsj0_eval
 from src.wham import wham, wham_eval
+from src.gender_dset import wsj0_gender
 from src.scheduler import RampScheduler, ConstantScheduler, DANNScheduler
 from src.gradient_penalty import calc_gradient_penalty
 from src.dashboard import Dashboard
 from src.ranger import Ranger
+from src.gender_mapper import GenderMapper
 
 class Trainer(Solver):
     def __init__(self, config):
@@ -86,9 +88,17 @@ class Trainer(Solver):
 
         self.load_data()
         self.set_model()
+        self.gender_mapper = GenderMapper()
 
         self.script_name = os.path.basename(__file__).split('.')[0].split('_')[-1]
         self.writer.add_tag(self.script_name)
+
+    def is_gender_dset(self, dset):
+        if '-' in dset:
+            g = dset.split('-')[1]
+            if g in [ 'MF', 'MM', 'FF' ]:
+                return True
+        return False
 
     def load_data(self):
         # Set training dataset
@@ -101,6 +111,16 @@ class Trainer(Solver):
         print(f'Sup: {self.dset}')
         print(f'Uns: {self.uns_dset}')
 
+        self.gender_exp = False
+        if self.is_gender_dset(self.dset):
+            print('Run WSJ0 Gender Exp')
+            d, sup_g = self.dset.split('-')
+            _, uns_g = self.uns_dset.split('-')
+            self.gender_exp = True
+            self.main_dset = d
+            self.sup_gender = sup_g
+            self.uns_gender = uns_g
+
         # Load loader for sup training
         seg_len = self.config['data']['segment']
         self.sup_loader = self.load_tr_dset(self.dset, seg_len)
@@ -112,7 +132,12 @@ class Trainer(Solver):
 
         # Load cv loader
         self.dsets = {}
-        for d in [ self.dset, self.uns_dset ]:
+        if not self.gender_exp:
+            cv_dsets = [ self.dset, self.uns_dset ]
+        else:
+            d, _ = self.dset.split('-')
+            cv_dsets = [ d ]
+        for d in cv_dsets:
             self.dsets[d] = { 'cv': self.load_cv_dset(d) }
 
     def load_tr_dset(self, dset, seg_len):
@@ -120,6 +145,9 @@ class Trainer(Solver):
         d = 'wsj' if dset == 'wsj0' else dset # stupid error
         if 'wham' in dset:
             return self.load_wham(dset, seg_len, 'tr')
+        if self.is_gender_dset(dset):
+            dset, g = dset.split('-')
+            return self.load_tr_gender_dset(dset, seg_len, g)
 
         audio_root = self.config['data'][f'{d}_root']
         tr_list = f'./data/{dset}/id_list/tr.pkl'
@@ -130,6 +158,28 @@ class Trainer(Solver):
                 one_chunk_in_utt = True,
                 mode = 'tr',
                 sp_factors = None)
+        tr_loader = DataLoader(trainset,
+                batch_size = self.batch_size,
+                shuffle = True,
+                num_workers = self.num_workers,
+                drop_last = True)
+        return tr_loader
+
+    def load_tr_gender_dset(self, dset, seg_len, gender):
+        """
+        dset: only wsj0 now
+        """
+        assert dset == 'wsj0'
+        d = 'wsj' if dset == 'wsj0' else dset # stupid error
+        audio_root = self.config['data'][f'{d}_root']
+        tr_list = f'./data/{dset}/id_list/tr.pkl'
+        trainset = wsj0_gender(tr_list,
+                audio_root = audio_root,
+                seg_len = seg_len,
+                pre_load = False,
+                one_chunk_in_utt = True,
+                mode = 'tr',
+                gender = gender)
         tr_loader = DataLoader(trainset,
                 batch_size = self.batch_size,
                 shuffle = True,
@@ -310,19 +360,27 @@ class Trainer(Solver):
             self.train_one_epoch(epoch, self.sup_loader)
 
             valid_score = {}
-            # Valid sup training dataset
-            sup_score = self.valid(self.dsets[self.dset]['cv'], epoch, prefix = self.dset, label = self.src_label)
-            valid_score[self.dset] = sup_score
+            if not self.gender_exp:
+                # Valid sup training dataset
+                sup_score = self.valid(self.dsets[self.dset]['cv'], epoch, prefix = self.dset, label = self.src_label)
+                valid_score[self.dset] = sup_score
 
-            # Valid uns training dataset
-            uns_score = self.valid(self.dsets[self.uns_dset]['cv'], epoch, no_save = True, prefix = self.uns_dset, label = self.tgt_label)
-            valid_score[self.uns_dset] = uns_score
+                # Valid uns training dataset
+                uns_score = self.valid(self.dsets[self.uns_dset]['cv'], epoch, no_save = True, prefix = self.uns_dset, label = self.tgt_label)
+                valid_score[self.uns_dset] = uns_score
+
+                # Use Uns score for model selection ( Cheat )
+                save_crit = uns_score['valid_sisnri']
+            else:
+                sup_score = self.gender_valid(self.dsets[self.main_dset]['cv'], epoch, prefix = self.main_dset)
+                valid_score[self.main_dset] = sup_score
+                save_crit = sup_score['valid_gender_sisnri'][self.uns_gender]
 
             # Valid not training dataset
-            for dset in self.dsets:
-                if dset != self.dset and dset != self.uns_dset:
-                    s = self.valid(self.dsets[dset]['cv'], epoch, no_save = True, prefix = dset)
-                    valid_score[dset] = s
+            #for dset in self.dsets:
+            #    if dset != self.dset and dset != self.uns_dset:
+            #        s = self.valid(self.dsets[dset]['cv'], epoch, no_save = True, prefix = dset)
+            #        valid_score[dset] = s
 
             if self.use_scheduler:
                 if self.scheduler_type == 'ReduceLROnPlateau':
@@ -334,7 +392,6 @@ class Trainer(Solver):
             info_dict['d_optim'] = self.d_optim.state_dict()
             info_dict['D_state_dict'] = self.D.state_dict()
 
-            save_crit = uns_score['valid_sisnri']
             self.saver.update(self.G, save_crit, model_name, info_dict)
 
             model_name = 'latest.pth'
@@ -657,4 +714,89 @@ class Trainer(Solver):
         valid_score['valid_loss'] = total_loss
         valid_score['valid_sisnri'] = total_sisnri
         valid_score['valid_domain_acc'] = domain_acc
+        return valid_score
+
+    def gender_valid(self, loader, epoch, no_save = False, prefix = ""):
+        def get_label(g):
+            if g == self.sup_gender:
+                return self.src_label
+            elif g == self.uns_gender:
+                return self.tgt_label
+            return -1
+
+        dset = prefix
+
+        self.G.eval()
+        total_loss = 0.
+        total_sisnri = 0.
+        domain_acc = 0.
+        cnt = 0
+        dcnt = 0
+
+        genders = [ 'MF', 'MM', 'FF' ]
+        gender_sisnri = { 'MF': 0., 'FF': 0., 'MM': 0, }
+        gender_cnt = { 'MF': 0., 'FF': 0., 'MM': 0, }
+
+        with torch.no_grad():
+            for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
+
+                padded_mixture = sample['mix'].to(DEV)
+                padded_source = sample['ref'].to(DEV)
+                mixture_lengths = sample['ilens'].to(DEV)
+                uids = sample['uid']
+
+                ml = mixture_lengths.max().item()
+                padded_mixture = padded_mixture[:, :ml]
+                padded_source = padded_source[:, :, :ml]
+                B = padded_source.size(0)
+
+                estimate_source, feature = self.G(padded_mixture)
+
+                loss, max_snr, estimate_source, reorder_estimate_source = \
+                    cal_loss(padded_source, estimate_source, mixture_lengths)
+
+                mix_sisnr = SISNR(padded_source, padded_mixture, mixture_lengths)
+                max_sisnri = (max_snr - mix_sisnr)
+
+                if self.adv_loss != 'wgan-gp':
+                    dp = (F.sigmoid(self.D(feature)) >= 0.5).float()
+
+                total_loss += loss.item() * B
+                total_sisnri += max_sisnri.sum().item()
+                cnt += B
+
+                for b in range(B):
+                    g = self.gender_mapper(uids[b], dset)
+                    gender_sisnri[g] += max_sisnri[b].item()
+                    gender_cnt[g] += 1
+
+                    if self.adv_loss != 'wgan-gp':
+                        dp_b = dp[b]
+                        label = get_label(g)
+
+                        if label != -1:
+                            dcnt = dp_b.numel()
+                            acc_num = (dp_b == label).sum().item()
+                            domain_acc += float(acc_num)
+
+        total_sisnri = total_sisnri / cnt
+        total_loss = total_loss / cnt
+        if self.adv_loss != 'wgan-gp' and label != None:
+            domain_acc = domain_acc / dcnt
+
+        meta = { f'{prefix}_epoch_loss': total_loss,
+                 f'{prefix}_epoch_sisnri': total_sisnri,
+                 f'{prefix}_epoch_domain_acc': domain_acc }
+
+        for g in genders:
+            gender_sisnri[g] /= gender_cnt[g]
+            meta[f'{prefix}_epoch_{g}_sisnri'] = gender_sisnri[g]
+
+        self.writer.log_epoch_info('valid', meta)
+
+        valid_score = {}
+        valid_score['valid_loss'] = total_loss
+        valid_score['valid_sisnri'] = total_sisnri
+        valid_score['valid_domain_acc'] = domain_acc
+        valid_score['valid_gender_sisnri'] = gender_sisnri
         return valid_score
