@@ -11,7 +11,7 @@ class Solver():
     def construct_test_conf(self, dsets = 'all', sdir = '', choose_best = False, compute_sdr = False):
         exp_name = os.path.basename(self.save_dir)
         if dsets == 'all':
-            dsets = [ 'wsj0', 'vctk', 'wham', 'wham-easy' ]
+            dsets = [ 'wsj0', 'vctk', 'wham', 'wham-easy', 'wsj0-vctk' ]
         conf = { 'data': {}, 'solver': {} }
 
         conf['data']['dsets'] = dsets
