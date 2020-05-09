@@ -29,6 +29,8 @@ from src.sep_utils import remove_pad, load_mix_sdr
 from src.gender_mapper import GenderMapper
 
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+plt.style.use('seaborn-colorblind')
 
 class Tester(Solver):
     def __init__(self, config):
@@ -39,19 +41,43 @@ class Tester(Solver):
 
         self.result_dir = config['solver']['result_dir']
         self.safe_mkdir(self.result_dir)
-        #self.result_name = config['solver'].get('result_name', 'result.json')
+        self.result_name = config['solver'].get('result_name', 'result.json')
+        self.result_name = os.path.join(self.result_dir, self.result_name)
 
         self.baseline = self.set_model(config['solver']['baseline'])
         self.comp = self.set_model(config['solver']['compare'])
+        self.source = self.config['data']['source']
+        self.target = self.config['data']['target']
         self.load_dset()
 
         self.compute_sdr = config['solver'].get('compute_sdr', True)
         self.g_mapper = GenderMapper()
 
+        self.pca_components = config['solver'].get('pca_components', 0)
+
+        self.low = config['solver'].get('low', -10)
+        self.high = config['solver'].get('high', 100)
+        self.frame_num = config['solver'].get('frame_num', 100000)
+        self.recompute = config['solver'].get('recompute', False)
+
+        self.layers = config['solver'].get('layers', 'all')
+        if self.layers == 'all':
+            self.layers = [ 'enc' ] + list(range(32))
+
+        self.splts = config['solver'].get('splts', [ 'cv', 'tt' ])
+        self.gender = config['solver'].get('gender', [ 'MF', 'MM', 'FF', 'all' ])
+
+        self.st_parallel = config['solver'].get('st_parallel', False)
+        self.bc_parallel = config['solver'].get('st_parallel', False)
+        if self.st_parallel and self.target == 'vctk':
+            print('VCTK is not parallel to any dset')
+            exit()
+
+        self.perplexiies = [ 40 ]
+        self.lrs = [ 700 ]
+
     def load_dset(self):
 
-        self.source = self.config['data']['source']
-        self.target = self.config['data']['target']
         self.dsets = [ self.source, self.target ]
 
         self.datasets = {}
@@ -99,7 +125,7 @@ class Tester(Solver):
         scale = read_scale(f'./data/{dset}')
         print(f'Load wham data with scale {scale}')
 
-        devset = wham_parallel_eval(cv_list,
+        devset = wham_eval(cv_list,
                 audio_root = audio_root,
                 pre_load = False,
                 mode = 'cv',
@@ -109,7 +135,7 @@ class Tester(Solver):
                 shuffle = False,
                 num_workers = self.num_workers)
 
-        testset = wham_parallel_eval(tt_list,
+        testset = wham_eval(tt_list,
                 audio_root = audio_root,
                 pre_load = False,
                 mode = 'tt',
@@ -147,28 +173,33 @@ class Tester(Solver):
         return model
 
     def exec(self):
-        rname = os.path.join(self.result_dir, 'result.json')
-        if not os.path.isfile(rname):
+        rname = self.result_name
+        if (not os.path.isfile(rname)) or self.recompute:
             result = self.compute_result()
         else:
             result = json.load(open(rname))
 
-        source_baseline = self.filter_data(self.source, result['baseline'][self.source])
-        target_baseline = self.filter_data(self.target, result['baseline'][self.target])
+        source_baseline = self.filter_data(self.source, result['baseline'][self.source], low = self.low, high = self.high)
+        target_baseline = self.filter_data(self.target, result['baseline'][self.target], low = self.low, high = self.high)
 
-        self.plot_st(source_baseline, target_baseline, splt = 'cv', gender = 'MF', frame_num = 100000)
+        pbar = tqdm(total = len(self.splts) * len(self.gender) )
+        for splt in self.splts:
+            for gender in self.gender:
+                self.plot_st(source_baseline, target_baseline, splt = splt, gender = gender, frame_num = self.frame_num,
+                        st_parallel = self.st_parallel, bc_parallel = self.bc_parallel)
+                pbar.update(1)
+        pbar.close()
 
     def filter_data(self, dataset, result, low = -10, high = 1000):
         ret = { 'cv': [], 'tt': [] }
         for splt in result:
-            uids = {'MF': [], 'MM': [], 'FF': [] }
+            uids = {'MF': [], 'MM': [], 'FF': [], 'all': [] }
             for uid in result[splt]:
                 sisnri, sdr = result[splt][uid]
                 g = self.g_mapper(uid, dataset)
-
                 if low <= sisnri <= high:
                     uids[g].append(uid)
-
+                    uids['all'].append(uid)
             ret[splt] = uids
         return ret
 
@@ -232,12 +263,27 @@ class Tester(Solver):
                     ret[uid] = [ sisnri, sdr ]
         return ret
 
-    def gather_feature(self, model, uids, dataset, splt, gender, layers, frame_num):
+    def gather_feature(self, model, uids, dataset, splt, gender, layers, frame_num, spk_num):
+        """
+        Args:
+            uids: dict or list of tuple
+                if dict         : gather frame_num based on spk_num, if spk number in uids < spk_num, use all
+                if list of tuple: [ (uid, frame_ids), ... ]
+        """
         ret = { l:[] for l in layers }
         cnt = 0
 
-        with torch.no_grad(), tqdm(total = frame_num) as pbar:
-            for uid in uids[splt][gender]:
+        frame_num_utt = frame_num // spk_num
+
+        ret_uids = []
+        if isinstance(uids, dict):
+            uids = uids[splt][gender]
+            random.shuffle(uids)
+            uids = uids[:spk_num]
+            uids = [ (u, None) for u in uids ]
+
+        with torch.no_grad():
+            for uid, frame_idx in tqdm(uids):
                 sample = self.datasets[dataset][splt].get_sample_by_uid(uid)
 
                 padded_mixture = sample['mix'].to(DEV)
@@ -252,31 +298,56 @@ class Tester(Solver):
 
                 estimate_source, feature = model.dict_forward(padded_mixture)
 
-                for l in layers:
-                    f = feature[l].cpu().numpy()[0]
-                    F, T = f.shape
-                    ret[l].append(f)
+                if frame_idx == None:
+                    F, T = feature[0][0].size()
+                    if T <= frame_num_utt:
+                        frame_idx = list(range(T))
+                    else:
+                        frame_idx = random.sample(list(range(T)), frame_num_utt)
+                        frame_idx.sort()
 
-                cnt += T
-                pbar.update(T)
-                if cnt >= frame_num:
-                    break
+                for l in layers:
+                    fidx = torch.LongTensor(frame_idx).to(DEV)
+                    f = torch.index_select(feature[l][0], 1, fidx)
+                    ret[l].append(f.cpu().numpy())
+
+                ret_uids.append((uid, frame_idx))
 
         for l in ret:
             cat_tensor = np.concatenate(ret[l], axis = 1)
             cat_tensor = cat_tensor.T
             ret[l] = cat_tensor
-        return ret
+        return ret, ret_uids
 
-    def plot_st(self, source_uids, target_uids, splt, gender, frame_num = 100000):
-        layers = [ 31 ]
+    def plot_st(self, source_uids, target_uids, splt, gender, frame_num = 100000, st_parallel = False, bc_parallel = True):
+        """
+        st_parallel: use same utt for source, target
+        bc_parallel: use same utt for baseline, comp
+        """
+        layers = self.layers
+        spk_num = 20
 
-        baseline_source_features = self.gather_feature(self.baseline, source_uids, self.source, splt, gender, layers, frame_num)
-        baseline_target_features = self.gather_feature(self.baseline, target_uids, self.target, splt, gender, layers, frame_num)
-        comp_source_features = self.gather_feature(self.comp, source_uids, self.source, splt, gender, layers, frame_num)
-        comp_target_features = self.gather_feature(self.comp, target_uids, self.target, splt, gender, layers, frame_num)
+        # Gather draw feature
+        baseline_source_features, bs_uids = self.gather_feature(self.baseline, source_uids, self.source, splt, gender, layers, frame_num, spk_num)
+        if st_parallel:
+            bt_uids = bs_uids
+        else:
+            bt_uids = target_uids
+        baseline_target_features, bt_uids = self.gather_feature(self.baseline, bt_uids, self.target, splt, gender, layers, frame_num, spk_num)
+        if bc_parallel:
+            cs_uids = bs_uids
+            ct_uids = bt_uids
+        else:
+            cs_uids = source_uids
+            ct_uids = target_uids
+        comp_source_features, cs_uids = self.gather_feature(self.comp, source_uids, self.source, splt, gender, layers, frame_num, spk_num)
+        if st_parallel:
+            ct_uids = cs_uids
+        comp_target_features, ct_uids = self.gather_feature(self.comp, target_uids, self.target, splt, gender, layers, frame_num, spk_num)
 
+        # Plot
         for l in layers:
+            print(f'Layer: {l}')
             b_sfs = baseline_source_features[l]
             b_tfs = baseline_target_features[l]
             c_sfs = comp_source_features[l]
@@ -290,44 +361,61 @@ class Tester(Solver):
 
             b_idx = b_sfs.shape[0] + b_tfs.shape[0]
 
-            #label = np.concatenate([b_s_label, b_t_label, c_s_label, c_t_label], axis = 0)
+            b_st_idx = b_sfs.shape[0]
+            c_st_idx = c_sfs.shape[0]
+
             b_label = np.concatenate([b_s_label, b_t_label], axis = 0)
             c_label = np.concatenate([c_s_label, c_t_label], axis = 0)
-            print(emb.shape)
-            #print(label.shape)
 
-            use_pca = True
             pca_prefix = ''
-            if use_pca:
+            if self.pca_components > 0:
+                print('Perform pca')
                 pca_prefix = 'pca_'
-                pca = PCA(n_components=10)
+                pca = PCA(n_components=self.pca_components)
                 pca.fit(emb)
                 emb = pca.transform(emb)
+                #print(pca.explained_variance_ratio_)
+                print(sum(pca.explained_variance_ratio_))
 
+            def plot_scatter(tsne_emb, label, fig_path, idx):
+                scale = 0.5
+                source = tsne_emb[:idx, :]
+                target = tsne_emb[idx:, :]
 
-            def plot_scatter(tsne_emb, label, fig_path):
-                x = tsne_emb[:, 0]
-                y = tsne_emb[:, 1]
-                plt.figure()
-                scatter = plt.scatter(x, y, s = 0.05, c = label, alpha=0.5)
-                legned = plt.legend(*scatter.legend_elements(), loc="lower left")
+                plt.figure(dpi = 1000)
+                sx = source[:, 0]
+                sy = source[:, 1]
+                blabel = label[:idx]
+                scatter = plt.scatter(sx, sy, s = scale, lw = 0, color = 'C0', alpha=0.75, label = 'Source')
 
+                tx = target[:, 0]
+                ty = target[:, 1]
+                tlabel = label[idx:]
+                scatter = plt.scatter(tx, ty, s = scale, lw = 0, color = 'C2', alpha=0.75, label = 'Target')
+
+                plt.legend(markerscale=10*scale)
                 plt.savefig(fig_path)
                 plt.close()
 
-            for pers in [ 10, 20, 30, 40, 50 ]:
-                for lr in [ 10, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]:
-                    print(pers, lr)
 
+            prefix = f'{splt}_{gender}_layer{l}_'
+
+            perplexiies = self.perplexiies
+            lrs = self.lrs
+            pbar = tqdm(total = len(perplexiies) * len(lrs))
+            for pers in perplexiies:
+                for lr in lrs:
                     tsne_emb = TSNE(n_components = 2, perplexity = pers, learning_rate = lr).fit_transform(emb)
 
                     b_tsne_emb = tsne_emb[:b_idx, :]
                     c_tsne_emb = tsne_emb[b_idx:, :]
 
-                    b_figpath = os.path.join(self.result_dir, f'{pca_prefix}_baseline_tsne_per{pers}_lr{lr}.png')
-                    plot_scatter(b_tsne_emb, b_label, b_figpath)
+                    b_figpath = os.path.join(self.result_dir, f'{prefix}{pca_prefix}baseline_tsne_per{pers}_lr{lr}.png')
+                    plot_scatter(b_tsne_emb, b_label, b_figpath, b_st_idx)
 
-                    c_figpath = os.path.join(self.result_dir, f'{pca_prefix}_compare_tsne_per{pers}_lr{lr}.png')
-                    plot_scatter(c_tsne_emb, c_label, c_figpath)
+                    c_figpath = os.path.join(self.result_dir, f'{prefix}{pca_prefix}compare_tsne_per{pers}_lr{lr}.png')
+                    plot_scatter(c_tsne_emb, c_label, c_figpath, c_st_idx)
 
-            exit()
+                    pbar.update(1)
+
+            pbar.close()
