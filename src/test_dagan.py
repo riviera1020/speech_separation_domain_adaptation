@@ -407,7 +407,7 @@ class Tester(Solver):
             total_layer_cos_sim[k] /= total_cnt
 
             if not self.comp_sim:
-                break
+                continue
 
             # compute cka/cca sim
             cf_iters = torch.stack(total_layer_clean_act[k], dim = 2).numpy()
