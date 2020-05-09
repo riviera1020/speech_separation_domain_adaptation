@@ -76,6 +76,8 @@ class Tester(Solver):
         self.perplexiies = [ 40 ]
         self.lrs = [ 700 ]
 
+        self.plot_which = config['solver'].get('plot_which', 'adapt')
+
     def load_dset(self):
 
         self.dsets = [ self.source, self.target ]
@@ -173,6 +175,12 @@ class Tester(Solver):
         return model
 
     def exec(self):
+        if self.plot_which == 'adapt':
+            self.exec_plot_adapt()
+        elif self.plot_which == 'baseline_st':
+            self.exec_plot_baseline_st()
+
+    def exec_plot_baseline_st(self):
         rname = self.result_name
         if (not os.path.isfile(rname)) or self.recompute:
             result = self.compute_result()
@@ -181,6 +189,27 @@ class Tester(Solver):
 
         source_baseline = self.filter_data(self.source, result['baseline'][self.source], low = self.low, high = self.high)
         target_baseline = self.filter_data(self.target, result['baseline'][self.target], low = self.low, high = self.high)
+
+        pbar = tqdm(total = len(self.splts) * len(self.gender) )
+        for splt in self.splts:
+            for gender in self.gender:
+                self.plot_baseline_st(source_baseline, target_baseline, splt = splt, gender = gender, frame_num = self.frame_num,
+                        st_parallel = self.st_parallel)
+                pbar.update(1)
+        pbar.close()
+
+    def exec_plot_adapt(self):
+        rname = self.result_name
+        if (not os.path.isfile(rname)) or self.recompute:
+            result = self.compute_result()
+        else:
+            result = json.load(open(rname))
+
+        #source_baseline = self.filter_data(self.source, result['baseline'][self.source], low = self.low, high = self.high)
+        #target_baseline = self.filter_data(self.target, result['baseline'][self.target], low = self.low, high = self.high)
+
+        source_baseline = self.filter_data(self.source, result['compare'][self.source], low = self.low, high = self.high)
+        target_baseline = self.filter_data(self.target, result['compare'][self.target], low = self.low, high = self.high)
 
         pbar = tqdm(total = len(self.splts) * len(self.gender) )
         for splt in self.splts:
@@ -318,6 +347,73 @@ class Tester(Solver):
             cat_tensor = cat_tensor.T
             ret[l] = cat_tensor
         return ret, ret_uids
+
+    def plot_baseline_st(self, source_uids, target_uids, splt, gender, frame_num = 100000, st_parallel = False):
+        """
+        st_parallel: use same utt for source, target
+        """
+        layers = self.layers
+        spk_num = 20
+
+        # Gather draw feature
+        baseline_source_features, bs_uids = self.gather_feature(self.baseline, source_uids, self.source, splt, gender, layers, frame_num, spk_num)
+        if st_parallel:
+            bt_uids = bs_uids
+        else:
+            bt_uids = target_uids
+        baseline_target_features, bt_uids = self.gather_feature(self.baseline, bt_uids, self.target, splt, gender, layers, frame_num, spk_num)
+
+        # Plot
+        for l in layers:
+            print(f'Layer: {l}')
+            b_sfs = baseline_source_features[l]
+            b_tfs = baseline_target_features[l]
+
+            emb = np.concatenate([ b_sfs, b_tfs ], axis = 0)
+            b_st_idx = b_sfs.shape[0]
+
+            pca_prefix = ''
+            if self.pca_components > 0:
+                print('Perform pca')
+                pca_prefix = 'pca_'
+                pca = PCA(n_components=self.pca_components)
+                pca.fit(emb)
+                emb = pca.transform(emb)
+                #print(pca.explained_variance_ratio_)
+                print(sum(pca.explained_variance_ratio_))
+
+            def plot_scatter(tsne_emb, fig_path, idx):
+                scale = 0.5
+                source = tsne_emb[:idx, :]
+                target = tsne_emb[idx:, :]
+
+                plt.figure(dpi = 1000)
+                sx = source[:, 0]
+                sy = source[:, 1]
+                scatter = plt.scatter(sx, sy, s = scale, lw = 0, color = 'C0', alpha=0.75, label = 'Source')
+
+                tx = target[:, 0]
+                ty = target[:, 1]
+                scatter = plt.scatter(tx, ty, s = scale, lw = 0, color = 'C2', alpha=0.75, label = 'Target')
+
+                plt.legend(markerscale=10*scale)
+                plt.savefig(fig_path)
+                plt.close()
+
+            prefix = f'{splt}_{gender}_layer{l}_'
+
+            perplexiies = self.perplexiies
+            lrs = self.lrs
+            pbar = tqdm(total = len(perplexiies) * len(lrs))
+            for pers in perplexiies:
+                for lr in lrs:
+                    tsne_emb = TSNE(n_components = 2, perplexity = pers, learning_rate = lr).fit_transform(emb)
+
+                    b_figpath = os.path.join(self.result_dir, f'{prefix}{pca_prefix}baseline_tsne_per{pers}_lr{lr}.png')
+                    plot_scatter(tsne_emb, b_figpath, b_st_idx)
+                    pbar.update(1)
+
+            pbar.close()
 
     def plot_st(self, source_uids, target_uids, splt, gender, frame_num = 100000, st_parallel = False, bc_parallel = True):
         """
