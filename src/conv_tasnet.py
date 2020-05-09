@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from src.trans_norm import TransNorm1d
 from src.sep_utils import overlap_and_add
 
 EPS = 1e-8
@@ -330,6 +331,8 @@ def chose_norm(norm_type, channel_size):
         return GlobalLayerNorm(channel_size)
     elif norm_type == "cLN":
         return ChannelwiseLayerNorm(channel_size)
+    elif norm_type == "TN":
+        return TransNorm1d(channel_size)
     else: # norm_type == "BN":
         # Given input (M, C, K), nn.BatchNorm1d(C) will accumulate statics
         # along M and K, so this BN usage is right.
