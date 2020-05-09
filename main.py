@@ -100,6 +100,17 @@ if __name__ == '__main__':
             exit()
         else:
             from src.test_dacluster import Tester as Solver
+    elif mode == 'danorm':
+        if not args.test:
+            print('Not imp')
+            exit()
+        else:
+            from src.test_danorm import Tester as Solver
+    elif mode == 'transnorm':
+        if not args.test:
+            from src.train_transnorm import Trainer as Solver
+        else:
+            from src.test_transnorm import Tester as Solver
     else:
         print('Not imp')
         exit()
