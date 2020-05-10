@@ -124,10 +124,11 @@ class Trainer(Solver):
         self.step = 0
         self.valid_times = 0
 
+        self.fp16 = config['solver'].get('fp16', False)
+
         self.load_data()
         self.set_model()
 
-        self.fp16 = config['solver'].get('fp16', False)
         self.convert_fp16()
 
         self.script_name = os.path.basename(__file__).split('.')[0].split('_')[-1]
