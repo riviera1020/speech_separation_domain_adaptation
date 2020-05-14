@@ -208,8 +208,8 @@ class Tester(Solver):
         #source_baseline = self.filter_data(self.source, result['baseline'][self.source], low = self.low, high = self.high)
         #target_baseline = self.filter_data(self.target, result['baseline'][self.target], low = self.low, high = self.high)
 
-        source_baseline = self.filter_data(self.source, result['compare'][self.source], low = self.low, high = self.high)
-        target_baseline = self.filter_data(self.target, result['compare'][self.target], low = self.low, high = self.high)
+        source_baseline = self.filter_data(self.source, result['comp'][self.source], low = self.low, high = self.high)
+        target_baseline = self.filter_data(self.target, result['comp'][self.target], low = self.low, high = self.high)
 
         pbar = tqdm(total = len(self.splts) * len(self.gender) )
         for splt in self.splts:
@@ -511,6 +511,14 @@ class Tester(Solver):
 
                     c_figpath = os.path.join(self.result_dir, f'{prefix}{pca_prefix}compare_tsne_per{pers}_lr{lr}.png')
                     plot_scatter(c_tsne_emb, c_label, c_figpath, c_st_idx)
+
+                    path = os.path.join(self.result_dir, f'{prefix}{pca_prefix}tsne_per{pers}_lr{lr}.npz')
+
+                    bs_emb = b_tsne_emb[:b_st_idx, :]
+                    bt_emb = b_tsne_emb[b_st_idx:, :]
+                    cs_emb = c_tsne_emb[:c_st_idx, :]
+                    ct_emb = c_tsne_emb[c_st_idx:, :]
+                    np.savez(path, bs=bs_emb, bt=bt_emb, cs=cs_emb, ct=ct_emb)
 
                     pbar.update(1)
 
