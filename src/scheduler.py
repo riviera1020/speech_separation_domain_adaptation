@@ -19,13 +19,13 @@ class RampScheduler(object):
             self.ss = start_step
             self.es = end_step
         else:
-            self.ss = (start_step * steps_per_epoch) - 1
+            self.ss = (start_step * steps_per_epoch)
             self.es = (end_step * steps_per_epoch) - 1
 
         self.sv = start_value
         self.ev = end_value
 
-        self.s = float(end_value - start_value) / (end_step - start_step)
+        self.s = float(end_value - start_value) / (self.ss - self.es)
 
     def value(self, step):
 

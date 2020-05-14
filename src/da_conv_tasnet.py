@@ -96,6 +96,26 @@ class DAConvTasNet(nn.Module):
 
         return est_source, feature
 
+    def cdan_forward(self, mixture):
+        """
+        Args:
+            mixture: [M, T], M is batch size, T is #samples
+        Returns:
+            est_source: [M, C, T]
+        """
+        mixture_w = self.encoder(mixture)
+        est_mask, feature = self.separator(mixture_w)
+        if self.consider_enc:
+            feature = torch.cat([feature, mixture_w], dim = 1)
+        est_source = self.decoder(mixture_w, est_mask)
+
+        # T changed after conv1d in encoder, fix it here
+        T_origin = mixture.size(-1)
+        T_conv = est_source.size(-1)
+        est_source = F.pad(est_source, (0, T_origin - T_conv))
+
+        return est_source, feature, est_mask
+
     def dict_forward(self, mixture, consider_mask = False):
         """
         Args:

@@ -79,6 +79,16 @@ class ConvTasNet(nn.Module):
         est_source = F.pad(est_source, (0, T_origin - T_conv))
         return est_source
 
+    def bn_forward(self, mixture):
+        mixture_w = self.encoder(mixture)
+        est_mask, feature = self.separator.bn_forward(mixture_w)
+        est_source = self.decoder(mixture_w, est_mask)
+
+        # T changed after conv1d in encoder, fix it here
+        T_origin = mixture.size(-1)
+        T_conv = est_source.size(-1)
+        est_source = F.pad(est_source, (0, T_origin - T_conv))
+        return est_source, feature
 
 class Encoder(nn.Module):
     """Estimation of the nonnegative mixture weight by a 1-D conv layer.
@@ -156,6 +166,8 @@ class TemporalConvNet(nn.Module):
         """
         super(TemporalConvNet, self).__init__()
         # Hyper-parameter
+        self.X = X
+        self.R = R
         self.C = C
         self.mask_nonlinear = mask_nonlinear
         # Components
@@ -220,6 +232,44 @@ class TemporalConvNet(nn.Module):
             raise ValueError("Unsupported mask non-linear function")
         return est_mask
 
+    def bn_forward(self, mixture_w):
+        """
+        Keep this API same with TasNet
+        Args:
+            mixture_w: [M, N, K], M is batch size
+        returns:
+            est_mask: [M, C, N, K]
+        """
+        if self.sep_out_d > 0:
+            return self.d_forward(mixture_w)
+
+        M, N, K = mixture_w.size()
+
+        if self.sep_in_d > 0:
+            mixture_w = self.sep_in_dropout(mixture_w)
+
+        feature = {}
+        score = mixture_w
+        for i, layer in enumerate(self.network):
+            if i == 2:
+                for r in range(self.R):
+                    for x in range(self.X):
+                        score, f = layer[r][x].bn_forward(score)
+
+                        l = r * self. X + x
+                        feature[l] = f
+            else:
+                score = layer(score)
+
+        score = score.view(M, self.C, N, K) # [M, C*N, K] -> [M, C, N, K]
+        if self.mask_nonlinear == 'softmax':
+            est_mask = F.softmax(score, dim=1)
+        elif self.mask_nonlinear == 'relu':
+            est_mask = F.relu(score)
+        else:
+            raise ValueError("Unsupported mask non-linear function")
+        return est_mask, feature
+
     def d_forward(self, mixture_w):
         M, N, K = mixture_w.size()
 
@@ -271,6 +321,37 @@ class TemporalBlock(nn.Module):
                 x = F.dropout(x, p=self.dropout, training = self.training)
             x = layer(x)
         return x + residual
+
+    def bn_forward(self, x):
+        """
+        Args:
+            x: [M, B, K]
+        Returns:
+            [M, B, K]
+        """
+        residual = x
+        feature = {}
+        for i, layer in enumerate(self.net):
+            if i == self.drop_loc and self.dropout > 0:
+                x = F.dropout(x, p=self.dropout, training = self.training)
+
+            if i == 2:
+                feature['res_pre'] = x
+
+            if i != 3:
+                x = layer(x)
+            else:
+                # dsconv
+                for j, ds_layer in enumerate(layer.net):
+                    if j == 2:
+                        feature['ds_pre'] = x
+                    x = ds_layer(x)
+                    if j == 2:
+                        feature['ds_post'] = x
+
+            if i == 2:
+                feature['res_post'] = x
+        return x + residual, feature
 
 class DepthwiseSeparableConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size,
