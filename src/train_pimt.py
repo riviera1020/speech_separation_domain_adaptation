@@ -164,6 +164,10 @@ class Trainer(Solver):
         uns_dset = self.config['data'].get('uns_dset', 'vctk')
         uns_seg_len = self.config['data'].get('uns_segment', 2.0)
 
+        self.same_dset = False
+        if dset == uns_dset:
+            self.same_dset = True
+
         print(f'Supvised Dataset   : {dset}')
         print(f'Unsupvised Dataset : {uns_dset}')
 
@@ -444,16 +448,19 @@ class Trainer(Solver):
             loss_pi_sup = self.con_loss(estimate_clean_sup, estimate_noise_sup, mixture_lengths, feat_clean_sup, feat_noise_sup)
 
             # pi on uns
-            uns_sample = uns_gen.__next__()
-            padded_mixture = uns_sample['mix'].to(DEV)
-            mixture_lengths = uns_sample['ilens'].to(DEV)
+            if not self.same_dset:
+                uns_sample = uns_gen.__next__()
+                padded_mixture = uns_sample['mix'].to(DEV)
+                mixture_lengths = uns_sample['ilens'].to(DEV)
 
-            with torch.no_grad():
-                self.model.eval()
-                estimate_clean_uns, feat_clean_uns = self.model.fetch_forward(padded_mixture, self.locs)
-                self.model.train()
-            estimate_noise_uns, feat_noise_uns = self.model.fetch_forward(padded_mixture, self.locs, self.transform)
-            loss_pi_uns = self.con_loss(estimate_clean_uns, estimate_noise_uns, mixture_lengths, feat_clean_uns, feat_noise_uns)
+                with torch.no_grad():
+                    self.model.eval()
+                    estimate_clean_uns, feat_clean_uns = self.model.fetch_forward(padded_mixture, self.locs)
+                    self.model.train()
+                estimate_noise_uns, feat_noise_uns = self.model.fetch_forward(padded_mixture, self.locs, self.transform)
+                loss_pi_uns = self.con_loss(estimate_clean_uns, estimate_noise_uns, mixture_lengths, feat_clean_uns, feat_noise_uns)
+            else:
+                loss_pi_uns = torch.zeros(1).to(DEV)
 
             w_sup = self.cal_consistency_weight(self.step, end_ep = self.warmup_step, init_w = self.sup_init_w, end_w = self.sup_pi_lambda)
             w_uns = self.cal_consistency_weight(self.step, end_ep = self.warmup_step, init_w = self.uns_init_w, end_w = self.uns_pi_lambda)
@@ -469,7 +476,11 @@ class Trainer(Solver):
             self.opt.step()
 
             # forward_hook cause memory leak, need to release(del) them
-            for feat in [ feat_clean_sup, feat_noise_sup, feat_clean_uns, feat_noise_uns ]:
+            if not self.same_dset:
+                hook_feats = [ feat_clean_sup, feat_noise_sup, feat_clean_uns, feat_noise_uns ]
+            else:
+                hook_feats = [ feat_clean_sup, feat_noise_sup ]
+            for feat in hook_feats:
                 self.model.clean_hook_tensor(feat)
 
             meta = { 'iter_loss': sup_loss.item(),

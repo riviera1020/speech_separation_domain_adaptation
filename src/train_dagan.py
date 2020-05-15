@@ -690,7 +690,8 @@ class Trainer(Solver):
         weighted_g_loss /= self.g_iters
         total_grad_norm /= self.g_iters
         meta = { 'g_loss': total_g_loss,
-                 'weighted_g_loss': weighted_g_loss }
+                 'weighted_g_loss': weighted_g_loss,
+                 'g_lambda': g_lambda }
         if self.adv_loss == 'gan':
             domain_acc = domain_acc / cnt
             meta['gen_domain_acc'] = domain_acc
