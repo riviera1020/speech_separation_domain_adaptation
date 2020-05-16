@@ -25,7 +25,7 @@ class RampScheduler(object):
         self.sv = start_value
         self.ev = end_value
 
-        self.s = float(end_value - start_value) / (self.ss - self.es)
+        self.s = float(end_value - start_value) / (self.es - self.ss)
 
     def value(self, step):
 
