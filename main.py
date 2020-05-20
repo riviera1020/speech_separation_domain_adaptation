@@ -90,6 +90,11 @@ if __name__ == '__main__':
         from src.train_limit import Trainer as Solver
     elif mode == 'remix':
         from src.train_remix import Trainer as Solver
+    elif mode == 'cmvn':
+        if not args.test:
+            from src.train_cmvn import Trainer as Solver
+        else:
+            from src.test_cmvn import Tester as Solver
     elif mode == 'cluster':
         if not args.test:
             print('Not imp')

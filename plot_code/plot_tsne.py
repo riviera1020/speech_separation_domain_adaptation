@@ -39,7 +39,7 @@ def plot_wham_last():
     cs = data['cs']
     ct = data['ct']
 
-    plt.figure(figsize = [12.8, 4.8])
+    plt.figure(figsize = [12.8, 4.8], dpi = 1000)
 
     plt.subplot(1, 2, 1)
     #plt.axis('off')
@@ -66,6 +66,7 @@ def plot_wham_last():
     plt.tight_layout()
     #plt.show()
     plt.savefig(fig_path, format = 'pdf')
+    plt.savefig(fig_path.replace('pdf', 'jpeg'), format = 'jpeg')
     plt.close()
 
 def plot_vctk_last():
@@ -82,7 +83,7 @@ def plot_vctk_last():
     cs = data['cs']
     ct = data['ct']
 
-    plt.figure(figsize = [12.8, 4.8])
+    plt.figure(figsize = [12.8, 4.8], dpi = 1000)
 
     plt.subplot(1, 2, 1)
     #plt.axis('off')
@@ -107,8 +108,9 @@ def plot_vctk_last():
     plt.xlabel('域對抗式方法', fontsize = label_fz)
     plt.legend(markerscale=15*scale, fontsize = 'x-large')
     plt.tight_layout()
-    plt.show()
-    #plt.savefig(fig_path, format = 'pdf')
+    #plt.show()
+    plt.savefig(fig_path, format = 'pdf')
+    plt.savefig(fig_path.replace('pdf', 'jpeg'), format = 'jpeg')
     plt.close()
 
 def plot_vctk_mid():
@@ -125,7 +127,7 @@ def plot_vctk_mid():
     cs = data['cs']
     ct = data['ct']
 
-    plt.figure(figsize = [12.8, 4.8])
+    plt.figure(figsize = [12.8, 4.8], dpi = 1000)
 
     plt.subplot(1, 2, 1)
     #plt.axis('off')
@@ -152,6 +154,7 @@ def plot_vctk_mid():
     plt.tight_layout()
     #plt.show()
     plt.savefig(fig_path, format = 'pdf')
+    plt.savefig(fig_path.replace('pdf', 'jpeg'), format = 'jpeg')
     plt.close()
 
 def plot_vctk_mid_alllayer():
@@ -168,7 +171,7 @@ def plot_vctk_mid_alllayer():
     cs = data['cs']
     ct = data['ct']
 
-    plt.figure(figsize = [12.8, 4.8])
+    plt.figure(figsize = [12.8, 4.8], dpi = 1000)
 
     plt.subplot(1, 2, 1)
     #plt.axis('off')
@@ -195,10 +198,11 @@ def plot_vctk_mid_alllayer():
     plt.tight_layout()
     #plt.show()
     plt.savefig(fig_path, format = 'pdf')
+    plt.savefig(fig_path.replace('pdf', 'jpeg'), format = 'jpeg')
     plt.close()
 
 
-#plot_wham_last()
-#plot_vctk_last()
-#plot_vctk_mid()
+plot_wham_last()
+plot_vctk_last()
+plot_vctk_mid()
 plot_vctk_mid_alllayer()
