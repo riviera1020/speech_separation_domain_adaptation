@@ -671,6 +671,7 @@ class Trainer(Solver):
 
             g_loss = g_real_loss + g_fake_loss
             g_lambda = self.Lg_scheduler.value(step)
+            print(g_lambda)
             _g_loss = g_loss * g_lambda
 
             self.D.zero_grad()

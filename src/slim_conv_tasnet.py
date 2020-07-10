@@ -11,7 +11,7 @@ from src.conv_tasnet import Encoder, Decoder, ChannelwiseLayerNorm, TemporalBloc
 EPS = 1e-8
 
 class MyConvTasNet(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, mode = 'ori'):
         """
         Args:
             N: Number of filters in autoencoder
@@ -25,9 +25,13 @@ class MyConvTasNet(nn.Module):
             norm_type: BN, gLN, cLN
             causal: causal or non-causal
             mask_nonlinear: use which non-linear function to generate mask
+            mode: ori, da, pimt
         """
         super(MyConvTasNet, self).__init__()
         # Hyper-parameter
+
+        # use to do alter forward in training baseline, dagan, pimt
+        self.mode = mode
 
         self.N = config['N']
         self.L = config['L']
@@ -63,6 +67,14 @@ class MyConvTasNet(nn.Module):
                 nn.init.xavier_normal_(p)
 
     def forward(self, mixture):
+        if self.mode == 'pimt':
+            return
+        elif self.mode == 'dagan':
+            return self.dagan_forward(mixture)
+        else:
+            return self.naive_forward(mixture)
+
+    def naive_forward(self, mixture):
         """
         Args:
             mixture: [M, T], M is batch size, T is #samples
@@ -78,6 +90,29 @@ class MyConvTasNet(nn.Module):
         T_conv = est_source.size(-1)
         est_source = F.pad(est_source, (0, T_origin - T_conv))
         return est_source
+
+    def dict_forward(self, mixture, consider_mask = False):
+        """
+        Args:
+            mixture: [M, T], M is batch size, T is #samples
+        Returns:
+            est_source: [M, C, T]
+        """
+        mixture_w = self.encoder(mixture)
+        est_mask, feature = self.separator.dict_forward(mixture_w)
+
+        feature['enc'] = mixture_w
+        if consider_mask:
+            feature['mask'] = est_mask
+
+        est_source = self.decoder(mixture_w, est_mask)
+
+        # T changed after conv1d in encoder, fix it here
+        T_origin = mixture.size(-1)
+        T_conv = est_source.size(-1)
+        est_source = F.pad(est_source, (0, T_origin - T_conv))
+
+        return est_source, feature
 
 class TemporalConvNet(nn.Module):
     def __init__(self, N, B, H, P, X, R, C, preC, norm_type="gLN", causal=False,
@@ -99,6 +134,8 @@ class TemporalConvNet(nn.Module):
         super(TemporalConvNet, self).__init__()
         # Hyper-parameter
         self.C = C
+        self.X = X
+        self.R = R
         self.preC = preC
         self.mask_nonlinear = mask_nonlinear
         # Components
@@ -187,3 +224,38 @@ class TemporalConvNet(nn.Module):
         else:
             raise ValueError("Unsupported mask non-linear function")
         return est_mask
+
+    def dict_forward(self, mixture_w):
+        """
+        Keep this API same with TasNet
+        Args:
+            mixture_w: [M, N, K], M is batch size
+        returns:
+            est_mask: [M, C, N, K]
+        """
+        M, N, K = mixture_w.size()
+
+        feature = {}
+        score = mixture_w
+        for i, layer in enumerate(self.network):
+            if i == len(self.network) - 2:
+                for r, repeat in enumerate(layer):
+                    for x, block in enumerate(repeat):
+                        score = block(score)
+                        idx = r * self.X + x
+                        feature[idx] = score
+            else:
+                score = layer(score)
+
+        score = score.view(M, self.preC, N, K) # [M, C*N, K] -> [M, C, N, K]
+        feature['emb'] = score
+
+        score = self.pred(score.permute(0, 3, 2, 1)).permute(0, 3, 2, 1)
+
+        if self.mask_nonlinear == 'softmax':
+            est_mask = F.softmax(score, dim=1)
+        elif self.mask_nonlinear == 'relu':
+            est_mask = F.relu(score)
+        else:
+            raise ValueError("Unsupported mask non-linear function")
+        return est_mask, feature

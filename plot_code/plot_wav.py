@@ -41,8 +41,26 @@ def main():
 
     uid = list(data.keys())[0]
     sample = get_data(root, uid, data)
-
     ref = sample['ref']
+
+    s1 = ref[0]
+    s2 = ref[1]
+    s1 = s1[:42500]
+    s2 = s2[8100:]
+
+    uid = list(data.keys())[1]
+    sample = get_data(root, uid, data)
+    ref = sample['ref']
+    s3 = ref[0][:42500]
+
+    plt.figure(figsize= [12.8, 9.6])
+    plt.axis('off')
+    plt.plot(s1, 'b', alpha = 0.75)
+    plt.plot(s2, 'r', alpha = 0.75)
+    plt.plot(s3, color = 'orange', alpha = 0.75)
+    #plt.show()
+    plt.savefig(f'./plot/wav_png/mix3.png', transparent = True)
+    exit()
 
     s1 = ref[0]
     s2 = ref[1]
@@ -71,6 +89,49 @@ def main():
     #plt.show()
     plt.savefig(f'./plot/wav_png/overlap_remix.png', transparent = True)
 
-main()
+
+def main_badresult():
+    dset = 'wsj0'
+    root = get_root(dset)
+    data_list = f'./data/{dset}/id_list/tt.pkl'
+    data = cPickle.load(open(data_list, 'rb'))
+
+    uid = list(data.keys())[0]
+    sample = get_data(root, uid, data)
+    ref = sample['ref']
+    scale = 0.3
+
+    s1 = ref[0]
+    s2 = ref[1]
+    s1 = s1[:42500]
+    s2 = s2[8100:]
+
+    #s = 1500
+    #x2 = list(range(s, s + s2.shape[0]))
+
+    #x = list(range(x2[-1] + 1))
+    #y = np.zeros(len(x))
+
+    #l = s1.shape[0] - s
+    #s2 = s2[l:]
+    #s1 = s1[:1500]
+
+    plt.figure(figsize= [12.8, 9.6])
+    plt.axis('off')
+    plt.plot(s2, 'r', alpha = 0)
+    plt.plot(scale * s2, 'r', alpha = 0.75)
+    plt.savefig(f'./plot/wav_png/red_nogood.png', transparent = True)
+    plt.close()
+
+    plt.figure(figsize= [12.8, 9.6])
+    plt.axis('off')
+    plt.plot(s1, 'b', alpha = 0)
+    plt.plot(scale * s1, 'b', alpha = 0.75)
+    plt.savefig(f'./plot/wav_png/blue_nogood.png', transparent = True)
+    plt.close()
+
+#main()
+
+main_badresult()
 
 

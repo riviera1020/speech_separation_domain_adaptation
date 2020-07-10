@@ -16,8 +16,8 @@ scale = 0.75
 
 label_fz = 32
 
-slabel = '源域'
-tlabel = '目標域'
+slabel = '來源領域'
+tlabel = '目標領域'
 
 def get_xy(tensor):
     x = tensor[:, 0]
@@ -61,7 +61,7 @@ def plot_wham_last():
 
     ctx, cty = get_xy(ct)
     plt.scatter(ctx, cty, s = scale, lw = 0, color = 'C2', alpha=alpha, label = tl)
-    plt.xlabel('域對抗式方法', fontsize = label_fz)
+    plt.xlabel('領域對抗式方法', fontsize = label_fz)
     plt.legend(markerscale=15*scale, fontsize = 'x-large')
     plt.tight_layout()
     #plt.show()
@@ -105,7 +105,7 @@ def plot_vctk_last():
 
     ctx, cty = get_xy(ct)
     plt.scatter(ctx, cty, s = scale, lw = 0, color = 'C2', alpha=alpha, label = tl)
-    plt.xlabel('域對抗式方法', fontsize = label_fz)
+    plt.xlabel('領域對抗式方法', fontsize = label_fz)
     plt.legend(markerscale=15*scale, fontsize = 'x-large')
     plt.tight_layout()
     #plt.show()
@@ -149,7 +149,7 @@ def plot_vctk_mid():
 
     ctx, cty = get_xy(ct)
     plt.scatter(ctx, cty, s = scale, lw = 0, color = 'C2', alpha=alpha, label = tl)
-    plt.xlabel('域對抗式方法', fontsize = label_fz)
+    plt.xlabel('領域對抗式方法', fontsize = label_fz)
     plt.legend(markerscale=15*scale, fontsize = 'x-large')
     plt.tight_layout()
     #plt.show()
@@ -193,7 +193,7 @@ def plot_vctk_mid_alllayer():
 
     ctx, cty = get_xy(ct)
     plt.scatter(ctx, cty, s = scale, lw = 0, color = 'C2', alpha=alpha, label = tl)
-    plt.xlabel('域對抗式方法', fontsize = label_fz)
+    plt.xlabel('領域對抗式方法', fontsize = label_fz)
     plt.legend(markerscale=15*scale, fontsize = 'x-large')
     plt.tight_layout()
     #plt.show()
