@@ -27,5 +27,13 @@ Please check the `Dataset Process` block in this
 [link](https://github.com/r06944010/Speech-Separation-TF2).
 
 ## Wham!
+Following instructions for downloading and moving noise audio to existing
+wsj0-2mix directory.
 
-Please refer to this [link](http://wham.whisper.ai/).
+1. Download noise audio from this [link](http://wham.whisper.ai/).
+2. Untar wham_noise_8k.tar to <noise_dir>
+3. `cp ./wham_mv.sh <noise_dir>`
+4. `cd <noise_dir>`
+5. Change wsj0-2mix path in wham_mv.sh to created wsj0-2mix path (Path
+   containing tr/, cv/, tt/)
+6. `bash wham_mv.sh`
