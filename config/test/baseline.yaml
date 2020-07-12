@@ -1,0 +1,9 @@
+data:
+    dsets: [ 'wsj0', 'vctk', 'wham', 'wham-easy', 'wsj0-vctk' ]
+    sample_rate: 8000
+
+solver:
+    result_dir: './result/test_snr'
+    train_config: './good/baseline/config.yaml'
+    checkpoint: './good/baseline/latest.pth'
+    compute_sdr: False

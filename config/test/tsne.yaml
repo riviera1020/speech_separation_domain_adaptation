@@ -1,0 +1,22 @@
+data:
+    source: 'wsj0'
+    target: 'vctk'
+    sample_rate: 8000
+
+solver:
+    result_dir: './result/chapter4/da_cluster_vctk_chose'
+    baseline:
+        train_config: './good/baseline-softmax-wsj0-2020_03_21_17_19_38/config.yaml'
+        checkpoint: './good/baseline-softmax-wsj0-2020_03_21_17_19_38/latest.pth'
+    compare:
+        train_config: './done_exp/chapter4/dagan-vctk-convpatch_ln-load_pre80-g00001_d0005_10it-dcgan-ramp_d1-1_g00001-05-chose13_23-2020_05_09_22_30_33/config.yaml'
+        checkpoint: './done_exp/chapter4/dagan-vctk-convpatch_ln-load_pre80-g00001_d0005_10it-dcgan-ramp_d1-1_g00001-05-chose13_23-2020_05_09_22_30_33/latest.pth'
+    compute_sdr: False
+    pca_components: 128
+    layers: 'all'
+    splts: [ 'cv' ]
+    gender: [ 'MF', 'MM', 'FF', 'all' ]
+    recompute: False
+    st_parallel: False
+    bc_parallel: True
+    frame_num: 50000

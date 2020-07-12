@@ -43,6 +43,16 @@ Testing
 ```python
 python main.py --c <config> --mode <mode> --test
 ```
+Testing Arugments
+
+| Method | `<mode>` | `<config>` |
+| :------------ | :--------------- | :-----|
+| Baseline | baseline | config/test/baseline.yaml |
+| Supervised Domain Adaptation | baseline | config/test/baseline.yaml |
+| Domain Adversarial | dagan | config/test/dagan.yaml |
+| T-SNE (For dagan) | dacluster | config/test/tsne.yaml |
+| Pi-Model | baseline | config/test/baseline.yaml |
+| Noisy Teacher | baseline | config/test/baseline.yaml |
 
 ## Config of training scripts
 

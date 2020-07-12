@@ -1,0 +1,9 @@
+data:
+    dsets: [ 'wsj0', 'wham-easy' ]
+    sample_rate: 8000
+
+solver:
+    result_dir: './result/chapter4/dagan-wham_easy-ln-loadpre80-10it-g00001_05-try2528_trycca_2'
+    train_config: './done_exp/chapter4/dagan-really_wham_easy-convpatch_ln-load_pre80-g00001_d0005_10it-dcgan-ramp_d1-1_g00001-05_try25_28layer-2020_04_14_00_48_26/config.yaml'
+    checkpoint: './done_exp/chapter4/dagan-really_wham_easy-convpatch_ln-load_pre80-g00001_d0005_10it-dcgan-ramp_d1-1_g00001-05_try25_28layer-2020_04_14_00_48_26/latest.pth'
+    compute_sdr: False
