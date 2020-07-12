@@ -30,7 +30,7 @@ python main.py --c <config> --mode <mode>
 Training Arugments
 
 | Method | `<mode>` | `<config>` |
-| :------------:| :---------------: | :-----:|
+| :------------ | :--------------- | :-----|
 | Baseline | baseline | config/train/baseline.yaml |
 | Supervised Domain Adaptation | limit | config/train/supervised_da.yaml |
 | Domain Adversarial | dagan | config/train/dagan.yaml |
