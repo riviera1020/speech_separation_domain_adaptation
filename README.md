@@ -1,4 +1,4 @@
-# Domain Generalization for Speech Separation
+# Toward Domain Generalization for Speech Separation
 This is code for my thesis, which including pytorch implementation of Conv-TasNet
 and several domain adaptation methods in my thesis.
 
@@ -22,17 +22,25 @@ Check [here](data/make_mix).
 
 ## Usage
 
-### Baseline
-
 Training
 ```python
-python main.py --c <config>
+python main.py --c <config> --mode <mode>
 ```
 
 Testing
 ```python
-python main.py --c <config> --test
+python main.py --c <config> --mode <mode> --test
 ```
+
+Methods
+
+| Method | <mode> | <config> |
+| :------------:| :---------------: | :-----:|
+| Baseline | baseline | |
+| Supervised Domain Adaptation | limit | |
+| Domain Adversarial | dagan | |
+| Pi-Model | pimt | |
+| Noisy Teacher | pimt | |
 
 ## Config of training scripts
 
