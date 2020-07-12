@@ -12,6 +12,7 @@ Check [here](data/make_mix).
 * PyTorch 1.4.0
 * `pip install -r requirements.txt`
 * [Comet-ml](https://github.com/comet-ml/comet-examples) (Visualization)
+* [TSNE-CUDA](https://github.com/CannyLab/tsne-cuda)
 * apex 0.1 (Deprecated)
 
 ## Basic Config
@@ -54,6 +55,19 @@ Testing Arugments
 | Pi-Model | baseline | config/test/baseline.yaml |
 | Noisy Teacher | baseline | config/test/baseline.yaml |
 
-## Config of training scripts
+## Hyperparameters of training/testing config
+
+### Training Config
+Basic training config is consist of `data`, `model`, `optim` and `solver`.
+
+### Testing Config
+Basic testing config is consist of `data` and `solver`.
+
+#### data
 
 ## Reference
+
+Links for code reference
+
+* [Conv-TasNet by Kaituo](https://github.com/kaituoxu/Conv-TasNet)
+* [Comet Intro by_sunprinceS](https://sunprinces.github.io/learning/2020/01/comet-ml-%E4%BD%A0%E5%BF%85%E9%A0%88%E7%9F%A5%E9%81%93%E7%9A%84-ml-%E5%AF%A6%E9%A9%97%E7%AE%A1%E7%90%86%E7%A5%9E%E5%99%A8/)

@@ -12,3 +12,4 @@ src/preprocess.py
 data/*/mix_sdr/*.json
 /test_*.py
 /result/*
+data/make-mix/__pycache__/
