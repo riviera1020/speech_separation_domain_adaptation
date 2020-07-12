@@ -5,9 +5,18 @@ import numpy as np
 import librosa
 import soundfile as sf
 import multiprocessing as mp
+import argparse
 
 from tqdm import tqdm
 from activlev import asl_meter
+
+def arg_parse():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--wsj_root', help='Path containing wsj0/', required = True)
+    parser.add_argument('--vctk_root', help='Path containing wav48/', required = True)
+    parser.add_argument('--out_dir', help='Path for output dir', required = True)
+    args = parser.parse_args()
+    return args
 
 def save_mkdir(path):
     if not os.path.exists(path):
@@ -36,14 +45,17 @@ mix_lists = [ ('./wsj0vctk_info/wsj0vctk_mix_2_spk_cv.txt', 'cv'),
               ('./wsj0vctk_info/wsj0vctk_mix_2_spk_tr.txt', 'tr'), ]
 
 # ===================
-# Params
+args = parse_args()
+
 # Dir contain wsj0/
-wsj0_root = '/home/riviera1020/Big/Corpus/wsj0-clean-wav/'
+#wsj0_root = '/home/riviera1020/Big/Corpus/wsj0-clean-wav/'
+wsj0_root = args.wsj_root
 
 # Dir contain wav48/
-vctk_root = '/home/riviera1020/Big/Corpus/VCTK-Corpus/'
+#vctk_root = '/home/riviera1020/Big/Corpus/VCTK-Corpus/'
+vctk_root = args.vctk_root
 
-out_dir = '/home/riviera1020/Big/Corpus/wsj0-vctk/wav8k/'
+out_dir = args.out_dir
 downsample_rate = 8000
 min_max = 'min'
 num_workers = 6
