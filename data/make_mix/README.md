@@ -30,10 +30,10 @@ Please check the `Dataset Process` block in this
 Following instructions for downloading and moving noise audio to existing
 wsj0-2mix directory.
 
-1. Download noise audio from this [link](http://wham.whisper.ai/).
-2. Untar wham_noise_8k.tar to <noise_dir>
-3. `cp ./wham_mv.sh <noise_dir>`
-4. `cd <noise_dir>`
+1. Download WHAM! noise dataset from this [link](http://wham.whisper.ai/).
+2. Build Wham from instruction in official website to <wham_mix>
+3. `cp ./wham_mv.sh <wham_mix>`
+4. `cd <wham_mix>`
 5. Change wsj0-2mix path in wham_mv.sh to created wsj0-2mix path (Path
    containing tr/, cv/, tt/)
 6. `bash wham_mv.sh`
