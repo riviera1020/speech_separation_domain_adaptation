@@ -34,7 +34,7 @@ python main.py --c <config> --mode <mode> --test
 
 Methods
 
-| Method | <mode> | <config> |
+| Method | `<mode>` | Example Config |
 | :------------:| :---------------: | :-----:|
 | Baseline | baseline | |
 | Supervised Domain Adaptation | limit | |
