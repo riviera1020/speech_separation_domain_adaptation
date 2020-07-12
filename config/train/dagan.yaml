@@ -1,0 +1,97 @@
+data:
+    dset: 'wsj0'
+    uns_dset: 'vctk'
+    sample_rate: 8000
+    segment: 4.0
+    uns_segment: 2.0
+
+model:
+    gen:
+        N: 256
+        L: 20
+        B: 256
+        H: 512
+        P: 3
+        X: 8
+        R: 4
+        C: 2
+        norm_type: 'gLN'
+        causal: 0
+        mask_nonlinear: 'softmax'
+        locs: [[3, 4], [3, 5], [3, 6], [3, 7]]
+        consider_enc: False
+    domain_cls:
+        # conv, conv-patch, linear
+        type: conv-patch
+        act: leaky_relu
+        norm_type: None
+        #norm_type: 'weight_norm'
+        layernorm: True
+        layers:
+            - filters: 256
+              kernel: 15
+              stride: 4
+              padding: 7
+            - filters: 256
+              kernel: 41
+              stride: 4
+              padding: 20
+            - filters: 1024
+              kernel: 41
+              stride: 4
+              padding: 20
+            - filters: 1024
+              kernel: 41
+              stride: 4
+              padding: 20
+            - filters: 1024
+              kernel: 5
+              stride: 1
+              padding: 2
+            - filters: 1
+              kernel: 3
+              stride: 1
+              padding: 1
+
+g_optim:
+    type: 'ranger'
+    lr: 0.0001
+    weight_decay: 0.0
+d_optim:
+    type: 'ranger'
+    lr: 0.001
+    weight_decay: 0.0
+
+solver:
+    exp_name: 'dagan'
+    save_dir: './checkpoints/'
+    max_save_num: 1
+    log_dir: './logs/'
+    epochs: 20
+    start_epoch: 0
+    pretrain_d_step: 0
+    pretrained: './good/baseline-softmax-wsj0-with_10epoch-2020_04_05_16_00_07/79_force.pth'
+    resume_exp_name: ""
+    resume_optim: False
+    D_grad_clip: 10
+    G_grad_clip: 10
+    batch_size: 2
+    num_workers: 4
+    g_iters: 1
+    d_iters: 20
+    gp_lambda: 10
+    adv_loss: 'gan'
+    Ld_scheduler:
+        function: 'constant'
+        value: 1.
+    Lg_scheduler:
+        function: 'ramp'
+        start_step: 0
+        end_step: 20
+        start_value: 0.0
+        end_value: 0.5
+    scheduler:
+        use: True
+        type: 'ReduceLROnPlateau'
+        patience: 4
+
