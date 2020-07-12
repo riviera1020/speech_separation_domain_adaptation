@@ -1,0 +1,21 @@
+====================
+Mode     : tr
+Total    : 20000
+Diff     : 9959
+M        : 4757
+F        : 5284
+Same spk : 0
+====================
+Mode     : cv
+Total    : 5000
+Diff     : 2490
+M        : 1156
+F        : 1354
+Same spk : 0
+====================
+Mode     : tt
+Total    : 3000
+Diff     : 1520
+M        : 1086
+F        : 394
+Same spk : 0
