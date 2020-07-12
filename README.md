@@ -27,20 +27,22 @@ Training
 python main.py --c <config> --mode <mode>
 ```
 
-Testing
-```python
-python main.py --c <config> --mode <mode> --test
-```
-
-Methods
+Training Arugments
 
 | Method | `<mode>` | Example Config |
 | :------------:| :---------------: | :-----:|
-| Baseline | baseline | |
+| Baseline | baseline | config/train/baseline.yaml |
 | Supervised Domain Adaptation | limit | |
 | Domain Adversarial | dagan | |
 | Pi-Model | pimt | |
 | Noisy Teacher | pimt | |
+
+---
+
+Testing
+```python
+python main.py --c <config> --mode <mode> --test
+```
 
 ## Config of training scripts
 
