@@ -29,13 +29,13 @@ python main.py --c <config> --mode <mode>
 
 Training Arugments
 
-| Method | `<mode>` | Example Config |
+| Method | `<mode>` | `<config>` |
 | :------------:| :---------------: | :-----:|
 | Baseline | baseline | config/train/baseline.yaml |
-| Supervised Domain Adaptation | limit | |
-| Domain Adversarial | dagan | |
-| Pi-Model | pimt | |
-| Noisy Teacher | pimt | |
+| Supervised Domain Adaptation | limit | config/train/supervised_da.yaml |
+| Domain Adversarial | dagan | config/train/dagan.yaml |
+| Pi-Model | pimt | config/train/pi_model.yaml |
+| Noisy Teacher | pimt | config/train/noisy_student.yaml |
 
 ---
 
