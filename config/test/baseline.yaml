@@ -7,8 +7,8 @@ solver:
     # result dir for saving result json
     result_dir: './result/test_snr'
     # training config of checkpoint
-    train_config: './good/baseline/config.yaml'
+    train_config: '/groups/public/szulin_separation_dataset/pretrained/config.yaml'
     # training checkpoionts
-    checkpoint: './good/baseline/latest.pth'
+    checkpoint: '/groups/public/szulin_separation_dataset/pretrained/99.pth'
     # Whether to compute SDR ( Very slow )
     compute_sdr: False
