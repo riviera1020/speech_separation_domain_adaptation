@@ -16,7 +16,6 @@ from src.solver import Solver
 from src.utils import DEV, DEBUG, NCOL, read_scale
 from src.conv_tasnet import ConvTasNet
 from src.da_conv_tasnet import DAConvTasNet
-from src.adanet import ADANet
 from src.pit_criterion import cal_loss
 from src.dataset import wsj0_eval
 from src.wham import wham_eval, wham_parallel_eval

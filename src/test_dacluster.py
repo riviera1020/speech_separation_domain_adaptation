@@ -19,7 +19,6 @@ from src.solver import Solver
 from src.utils import DEV, DEBUG, NCOL, read_scale
 from src.conv_tasnet import ConvTasNet
 from src.da_conv_tasnet import DAConvTasNet
-from src.slim_conv_tasnet import MyConvTasNet
 from src.adanet import ADANet
 from src.pit_criterion import cal_loss
 from src.dataset import wsj0_eval
@@ -167,10 +166,7 @@ class Tester(Solver):
             mconf = tr_config['model']
 
         model_type = tr_config['model'].get('type', None)
-        if model_type == 'slim':
-            model = MyConvTasNet(mconf).to(DEV)
-        else:
-            model = DAConvTasNet(mconf).to(DEV)
+        model = DAConvTasNet(mconf).to(DEV)
         model.load_state_dict(state_dict)
         return model
 
