@@ -1,9 +1,14 @@
 data:
+    # testing dataset
     dsets: [ 'wsj0', 'vctk', 'wham', 'wham-easy', 'wsj0-vctk' ]
     sample_rate: 8000
 
 solver:
+    # result dir for saving result json
     result_dir: './result/test_snr'
+    # training config of checkpoint
     train_config: './good/baseline/config.yaml'
+    # training checkpoionts
     checkpoint: './good/baseline/latest.pth'
+    # Whether to compute SDR ( Very slow )
     compute_sdr: False

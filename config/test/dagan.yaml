@@ -1,3 +1,4 @@
+# Same with 'config/test/baseline.yaml'
 data:
     dsets: [ 'wsj0', 'wham-easy' ]
     sample_rate: 8000
