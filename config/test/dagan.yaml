@@ -4,7 +4,7 @@ data:
     sample_rate: 8000
 
 solver:
-    result_dir: './result/chapter4/dagan-wham_easy-ln-loadpre80-10it-g00001_05-try2528_trycca_2'
-    train_config: './done_exp/chapter4/dagan-really_wham_easy-convpatch_ln-load_pre80-g00001_d0005_10it-dcgan-ramp_d1-1_g00001-05_try25_28layer-2020_04_14_00_48_26/config.yaml'
-    checkpoint: './done_exp/chapter4/dagan-really_wham_easy-convpatch_ln-load_pre80-g00001_d0005_10it-dcgan-ramp_d1-1_g00001-05_try25_28layer-2020_04_14_00_48_26/latest.pth'
+    result_dir: './result/dagan'
+    train_config: '/groups/public/szulin_separation_dataset/pretrained/dagan-vctk-convpatch_ln-load_pre80-g00001_d0005_10it-dcgan-ramp_d1-1_g00001-05-chose13_23-2020_05_09_22_30_33/config.yaml'
+    checkpoint: '/groups/public/szulin_separation_dataset/pretrained/dagan-vctk-convpatch_ln-load_pre80-g00001_d0005_10it-dcgan-ramp_d1-1_g00001-05-chose13_23-2020_05_09_22_30_33/latest.pth'
     compute_sdr: False

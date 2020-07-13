@@ -10,12 +10,12 @@ solver:
     compute_sdr: False
     # baseline model information
     baseline:
-        train_config: './good/baseline-softmax-wsj0-2020_03_21_17_19_38/config.yaml'
-        checkpoint: './good/baseline-softmax-wsj0-2020_03_21_17_19_38/latest.pth'
+        train_config: '/groups/public/szulin_separation_dataset/pretrained/config.yaml'
+        checkpoint: '/groups/public/szulin_separation_dataset/pretrained/99.pth'
     # compared model information
     compare:
-        train_config: './done_exp/chapter4/dagan-vctk-convpatch_ln-load_pre80-g00001_d0005_10it-dcgan-ramp_d1-1_g00001-05-chose13_23-2020_05_09_22_30_33/config.yaml'
-        checkpoint: './done_exp/chapter4/dagan-vctk-convpatch_ln-load_pre80-g00001_d0005_10it-dcgan-ramp_d1-1_g00001-05-chose13_23-2020_05_09_22_30_33/latest.pth'
+        train_config: '/groups/public/szulin_separation_dataset/pretrained/dagan-vctk-convpatch_ln-load_pre80-g00001_d0005_10it-dcgan-ramp_d1-1_g00001-05-chose13_23-2020_05_09_22_30_33/config.yaml'
+        checkpoint: '/groups/public/szulin_separation_dataset/pretrained/dagan-vctk-convpatch_ln-load_pre80-g00001_d0005_10it-dcgan-ramp_d1-1_g00001-05-chose13_23-2020_05_09_22_30_33/latest.pth'
     # pca components
     pca_components: 128
     # layer index for plotting tsne
