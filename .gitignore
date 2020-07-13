@@ -13,3 +13,7 @@ data/*/mix_sdr/*.json
 /test_*.py
 /result/*
 data/make-mix/__pycache__/
+done_exp/*
+good/*
+layer_sim/*
+plot/*
