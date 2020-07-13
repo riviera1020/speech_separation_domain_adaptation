@@ -41,7 +41,7 @@ solver:
     resume_exp_name: ""
     resume_optim: False
     # pretrained checkpoint of baseline
-    pretrained: './good/baseline-softmax-wsj0-with_10epoch-2020_04_05_16_00_07/99_force.pth'
+    pretrained: '/groups/public/szulin_separation_dataset/pretrained/99.pth'
     # Whether considering source domain si-snr loss while transfer learning.
     jointly: True
     # joint training weight of source domain.

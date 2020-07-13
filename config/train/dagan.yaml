@@ -89,7 +89,7 @@ solver:
     resume_exp_name: ""
     resume_optim: False
     # pretrained checkpoints of baseline model
-    pretrained: './good/baseline-softmax-wsj0-with_10epoch-2020_04_05_16_00_07/79_force.pth'
+    pretrained: '/groups/public/szulin_separation_dataset/pretrained/99.pth'
     # Steps for pretraining discriminator
     pretrain_d_step: 0
     # grad clip for Conv-TasNet (including generator)

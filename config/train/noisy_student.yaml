@@ -34,8 +34,8 @@ solver:
     log_dir: './logs/'
     pretrained: ''
     pretrained_optim: False
-    pretrained_teacher: './pretrained/baseline-softmax-wsj0-with_10epoch-2020_04_05_16_00_07/latest.pth'
-    teacher_config: './pretrained/baseline-softmax-wsj0-with_10epoch-2020_04_05_16_00_07/config.yaml'
+    pretrained_teacher: '/groups/public/szulin_separation_dataset/pretrained/99.pth'
+    teacher_config: '/groups/public/szulin_separation_dataset/pretrained/config.yaml'
     max_save_num: 1
     epochs: 100
     start_epoch: 0

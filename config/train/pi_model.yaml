@@ -22,7 +22,7 @@ model:
     causal: 0
     mask_nonlinear: 'softmax'
     # Perturbation 2: add dropout on sep output
-    sep_out_dropout: 0.1
+    sep_out_dropout: 0.0
 
 optim:
     type: 'ranger'
@@ -33,7 +33,7 @@ solver:
     exp_name: 'pi_model-pertrub_dropout01-consistency_emb'
     save_dir: './checkpoints/'
     log_dir: './logs/'
-    pretrained: './pretrained/baseline-softmax-wsj0-with_10epoch-2020_04_05_16_00_07/89_force.pth'
+    pretrained: '/groups/public/szulin_separation_dataset/pretrained/99.pth'
     pretrained_optim: False
     max_save_num: 1
     epochs: 10
