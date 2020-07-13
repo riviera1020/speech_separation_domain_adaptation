@@ -19,7 +19,21 @@ Check [here](data/make_mix).
 
 1. `cp config/path_example.yaml config/path.yaml`
 2. Change path in config/path.yaml
-3. Change information in .comet.config
+    - `wsj_root`: wsj0-2mix directory
+    - `vctk_root`: vctk-2mix directory
+    - `wsj0-vctk_root`: wsj0-vctk directory
+    - Noise of Wham is moved to `wsj_root` based on [Data Process](#Data
+      Process)
+    - All directory must contain 'tr/', 'cv/' and 'tt/' subfolder.
+
+## Comet Introduction
+
+1. Create Comet account. [Link](https://www.comet.ml/docs/quick-start/#quick-start-fhttps://www.comet.ml/docs/quick-start/#quick-start-for-pythonor-python) ( Student Plan Suggested )
+2. Create Comet Project.
+3. Change information in .comet.config 
+    - `api_key`: API Key of your account
+    - `workspace`: Account name
+    - `project_name`: Your project name
 
 ## Usage
 
