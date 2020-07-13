@@ -28,7 +28,6 @@ from src.scheduler import RampScheduler, ConstantScheduler, DANNScheduler
 class Trainer(Solver):
 
     def __init__(self, config):
-        #def __init__(self, data, model, optimizer, args):
         super(Trainer, self).__init__(config)
 
         self.exp_name = config['solver']['exp_name']
