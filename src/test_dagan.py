@@ -12,7 +12,6 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
-import src.cka as cka
 from src.solver import Solver
 from src.utils import DEV, DEBUG, NCOL, read_scale
 from src.conv_tasnet import ConvTasNet
@@ -24,11 +23,6 @@ from src.wham import wham_eval, wham_parallel_eval
 from src.evaluation import cal_SDR, cal_SISNRi
 from src.sep_utils import remove_pad, load_mix_sdr
 from src.gender_mapper import GenderMapper
-
-import sys
-sys.path.append('../svcca')
-import cca_core
-import pwcca
 
 class Tester(Solver):
     def __init__(self, config):
@@ -183,34 +177,6 @@ class Tester(Solver):
         distance = (cf - nf).abs().mean()
         return distance.item()
 
-    def compute_svcca(self, cf, nf):
-        '''
-        cf: [F, data_points]
-        nf: [F, data_points]
-        '''
-        sim = cca_core.svcca(cf, nf, keep_dims = 20)
-        return sim
-
-    def compute_pwcca(self, cf, nf):
-        '''
-        cf: [F, data_points]
-        nf: [F, data_points]
-        '''
-        pw, w, c = pwcca.compute_pwcca(cf, nf, epsilon = 1e-10)
-        return pw
-
-    def compute_cka(self, cf, nf):
-        '''
-        cf: [F, data_points]
-        nf: [F, data_points]
-        '''
-        sim = cka.cka(cka.gram_linear(cf.T), cka.gram_linear(nf.T))
-        return sim
-
-    def compute_cca(self, cf, nf):
-        sim = cka.cca(cka.cca(cf.T), cka.cca(nf.T))
-        return sim
-
     def compute_cos_sim(self, cf, nf):
         '''
         cf: [F, T]
@@ -315,14 +281,8 @@ class Tester(Solver):
         total_layer_L1_dis = { k: 0. for k in lkeys }
         total_layer_cos_sim = { k: 0. for k in lkeys }
 
-        total_layer_ckas = { k:[] for k in lkeys }
-        total_layer_pwccas = { k:[] for k in lkeys }
         total_layer_clean_act = { k:[] for k in lkeys }
         total_layer_noisy_act = { k:[] for k in lkeys }
-        total_layer_cka_mean = { k:0 for k in lkeys }
-        total_layer_cka_std = { k:0 for k in lkeys }
-        total_layer_pwcca_mean = { k:0 for k in lkeys }
-        total_layer_pwcca_std = { k:0 for k in lkeys }
 
         with torch.no_grad():
             for i, sample in enumerate(tqdm(loader, ncols = NCOL)):
@@ -408,25 +368,6 @@ class Tester(Solver):
 
             if not self.comp_sim:
                 continue
-
-            # compute cka/cca sim
-            cf_iters = torch.stack(total_layer_clean_act[k], dim = 2).numpy()
-            nf_iters = torch.stack(total_layer_noisy_act[k], dim = 2).numpy()
-
-            for it in range(self.comp_sim_iter):
-                cf = cf_iters[:, it, :]
-                nf = nf_iters[:, it, :]
-
-                cka_sim = self.compute_cka(cf, nf)
-                total_layer_ckas[k].append(cka_sim)
-
-                pwcca_sim = self.compute_pwcca(cf, nf)
-                total_layer_pwccas[k].append(pwcca_sim)
-
-            total_layer_cka_mean[k] = float(np.mean(total_layer_ckas[k]))
-            total_layer_pwcca_mean[k] = float(np.mean(total_layer_pwccas[k]))
-            total_layer_cka_std[k] = float(np.std(total_layer_ckas[k]))
-            total_layer_pwcca_std[k] = float(np.std(total_layer_pwccas[k]))
 
         gender_SDRi = {}
         for g in gender_SISNRi:

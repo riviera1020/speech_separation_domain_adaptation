@@ -46,78 +46,27 @@ if __name__ == '__main__':
             from src.train_baseline import Trainer as Solver
         else:
             from src.test_baseline import Tester as Solver
-    elif mode == 'uns':
-        if not args.test:
-            from src.train_uns import Trainer as Solver
-        else:
-            pass
-    elif mode == 'semi':
-        if not args.test:
-            from src.train_semi import Trainer as Solver
-        else:
-            from src.test_semi import Tester as Solver
-    elif mode == 'da':
-        if not args.test:
-            from src.train_da import Trainer as Solver
-        else:
-            pass
     elif mode == 'dagan':
         if not args.test:
             from src.train_dagan import Trainer as Solver
         else:
             from src.test_dagan import Tester as Solver
-    elif mode == 'dagan_pl':
-        from src.train_dagan_pl import Trainer as Solver
-    elif mode == 'mmd':
-        from src.train_mmd import Trainer as Solver
     elif mode == 'pimt':
         from src.train_pimt import Trainer as Solver
-    elif mode == 'debug':
-        from src.train_debug import Trainer as Solver
     elif mode == 'freeze':
         from src.train_freeze import Trainer as Solver
     elif mode == 'perturb':
         from src.train_perturb import Trainer as Solver
     elif mode == 'augm':
         from src.train_augm import Trainer as Solver
-    elif mode == 'phncls':
-        from src.train_phncls import Trainer as Solver
-    elif mode == 'mixemb':
-        from src.train_mixemb import Trainer as Solver
-    elif mode == 'mcd':
-        from src.train_mcd import Trainer as Solver
     elif mode == 'limit':
         from src.train_limit import Trainer as Solver
-    elif mode == 'remix':
-        from src.train_remix import Trainer as Solver
-    elif mode == 'cmvn':
-        if not args.test:
-            from src.train_cmvn import Trainer as Solver
-        else:
-            from src.test_cmvn import Tester as Solver
-    elif mode == 'cluster':
-        if not args.test:
-            print('Not imp')
-            exit()
-        else:
-            from src.test_cluster import Tester as Solver
     elif mode == 'dacluster':
         if not args.test:
             print('Not imp')
             exit()
         else:
             from src.test_dacluster import Tester as Solver
-    elif mode == 'danorm':
-        if not args.test:
-            print('Not imp')
-            exit()
-        else:
-            from src.test_danorm import Tester as Solver
-    elif mode == 'transnorm':
-        if not args.test:
-            from src.train_transnorm import Trainer as Solver
-        else:
-            from src.test_transnorm import Tester as Solver
     else:
         print('Not imp')
         exit()
