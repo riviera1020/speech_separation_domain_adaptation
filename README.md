@@ -27,6 +27,9 @@ Check [here](data/make_mix).
     - All directory must contain 'tr/', 'cv/' and 'tt/' subfolder.
 
 ## Comet Introduction
+Comet is a visualization tool. You can ignore this part if you don't need
+visualization.
+
 
 1. Create Comet account. [Link](https://www.comet.ml/docs/quick-start/#quick-start-fhttps://www.comet.ml/docs/quick-start/#quick-start-for-pythonor-python) ( Student Plan Suggested )
 2. Create Comet Project.
