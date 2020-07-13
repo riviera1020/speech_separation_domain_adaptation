@@ -1,4 +1,7 @@
 data:
+    # Config in gender experiment
+    # 'dset' and 'uns_dset' support 'wsj0-MF', 'wsj0-MM' and 'wsj0-FF'
+    # 'MF' stand for only male-female mixing trainset
     dset: 'wsj0-MF'
     uns_dset: 'wsj0-FF'
     sample_rate: 8000
@@ -21,11 +24,9 @@ model:
         locs: [[3, 4], [3, 5], [3, 6], [3, 7]]
         consider_enc: False
     domain_cls:
-        # conv, conv-patch, linear
         type: conv-patch
         act: leaky_relu
         norm_type: None
-        #norm_type: 'weight_norm'
         layernorm: True
         layers:
             - filters: 256

@@ -1,3 +1,7 @@
+# There is two perturbation need to be set in noisy student.
+# First one can be set in 'input_transform' of 'solver', which stand for gaussian noise.
+# Second one is set in 'sep_out_dropout' of 'model', which stand for dropout part.
+# Choose one while training.
 data:
     dset: 'wsj0'
     sample_rate: 8000
@@ -40,6 +44,8 @@ solver:
     grad_clip: 5
     batch_size: 2
     num_workers: 4
+    # hyperparameter for noisy student.
+    # Only need to config scheduler for weight.
     ns:
         use: True
         scheduler:

@@ -1,11 +1,15 @@
 data:
     dset: 'wsj0'
-    uns_dset: 'vctk'
     sample_rate: 8000
     segment: 4.0
+    # dataset for unsupervised domain adaptation.
+    # share same namespace with 'dset'
+    uns_dset: 'vctk'
+    # segment length of 'uns_dset'
     uns_segment: 2.0
 
 model:
+    # almost same with 'model' part in 'config/train/baseline.yaml'
     gen:
         N: 256
         L: 20
@@ -18,15 +22,25 @@ model:
         norm_type: 'gLN'
         causal: 0
         mask_nonlinear: 'softmax'
+        # layer index for representation extraction
+        # format is [ [ r, x ], ... ]
+        # r stand for index of R
+        # x stand for index of X
         locs: [[3, 4], [3, 5], [3, 6], [3, 7]]
+        # whether concat encoder repersentation
         consider_enc: False
     domain_cls:
         # conv, conv-patch, linear
+        # Always use conv-patch in my thesis
         type: conv-patch
+        # activation function for each layer
         act: leaky_relu
+        # Apply parameter normalization alog
+        # support None, 'weight_norm', 'spectral_norm'
         norm_type: None
-        #norm_type: 'weight_norm'
+        # Whether to use layernorm between each layer
         layernorm: True
+        # Conv layer hyperparameters for each conv layer
         layers:
             - filters: 256
               kernel: 15
@@ -53,10 +67,13 @@ model:
               stride: 1
               padding: 1
 
+# optim for Conv-TasNet (including generator)
 g_optim:
     type: 'ranger'
     lr: 0.0001
     weight_decay: 0.0
+
+# optim for discrimanator
 d_optim:
     type: 'ranger'
     lr: 0.001
@@ -69,21 +86,37 @@ solver:
     log_dir: './logs/'
     epochs: 20
     start_epoch: 0
-    pretrain_d_step: 0
-    pretrained: './good/baseline-softmax-wsj0-with_10epoch-2020_04_05_16_00_07/79_force.pth'
     resume_exp_name: ""
     resume_optim: False
+    # pretrained checkpoints of baseline model
+    pretrained: './good/baseline-softmax-wsj0-with_10epoch-2020_04_05_16_00_07/79_force.pth'
+    # Steps for pretraining discriminator
+    pretrain_d_step: 0
+    # grad clip for Conv-TasNet (including generator)
     D_grad_clip: 10
+    # grad clip for discriminator
     G_grad_clip: 10
     batch_size: 2
     num_workers: 4
+    # update freq of training generator in one iteration of whole domain adversarial method.
     g_iters: 1
+    # update freq of training discriminator.
     d_iters: 20
-    gp_lambda: 10
+    # adversarial loss, support 'gan', 'wgan-gp', 'hinge'
+    # 'hinge' stand for hinge loss used in "Spectral Normalization'
     adv_loss: 'gan'
+    # gradient panelty of 'wgan-gp'
+    gp_lambda: 10
+    # training loss weight scheduling for domain discriminator
+    # support 'constant', 'ramp' ( ramp function )
+    # 'value': weight value
     Ld_scheduler:
         function: 'constant'
         value: 1.
+    # start_step: start epoch index
+    # end_step: end epoch index
+    # start_value: start value of weight
+    # end_value: end value of weight
     Lg_scheduler:
         function: 'ramp'
         start_step: 0

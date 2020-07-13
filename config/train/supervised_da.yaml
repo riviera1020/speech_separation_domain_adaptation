@@ -2,9 +2,15 @@ data:
     dset: 'wsj0'
     sample_rate: 8000
     segment: 4.0
+    # Target domain dataset. share same namespace with 'dset'.
     limit_dset: 'wham-easy'
+    # segnemt length for target domain dataset
     limit_segment: 1.0
+    # speaker number for target domain dataset, support <int> or 'all'.
+    # This config will decrease total training length of targer domain dataset.
     limit_spk_num: 50
+    # max utterance number in each speaker, support for <int> or 'all'.
+    # This config will decrease total training length of targer domain dataset.
     limit_utts_per_spk: 'all'
 
 model:
@@ -28,14 +34,17 @@ optim:
 solver:
     exp_name: 'supervised_da_use_limited_data'
     save_dir: './checkpoints/'
-    pretrained: './good/baseline-softmax-wsj0-with_10epoch-2020_04_05_16_00_07/99_force.pth'
     max_save_num: 3
     log_dir: './logs/'
     epochs: 10
     start_epoch: 0
     resume_exp_name: ""
     resume_optim: False
+    # pretrained checkpoint of baseline
+    pretrained: './good/baseline-softmax-wsj0-with_10epoch-2020_04_05_16_00_07/99_force.pth'
+    # Whether considering source domain si-snr loss while transfer learning.
     jointly: True
+    # joint training weight of source domain.
     jointly_w: 1.0
     grad_clip: 5
     batch_size: 3

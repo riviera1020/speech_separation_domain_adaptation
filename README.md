@@ -36,7 +36,7 @@ Training Arugments
 | Supervised Domain Adaptation | limit | config/train/supervised_da.yaml |
 | Domain Adversarial | dagan | config/train/dagan.yaml |
 | Pi-Model | pimt | config/train/pi_model.yaml |
-| Noisy Teacher | pimt | config/train/noisy_student.yaml |
+| Noisy Student | pimt | config/train/noisy_student.yaml |
 
 ---
 
@@ -53,17 +53,25 @@ Testing Arugments
 | Domain Adversarial | dagan | config/test/dagan.yaml |
 | T-SNE (For dagan) | dacluster | config/test/tsne.yaml |
 | Pi-Model | baseline | config/test/baseline.yaml |
-| Noisy Teacher | baseline | config/test/baseline.yaml |
+| Noisy Student | baseline | config/test/baseline.yaml |
 
 ## Hyperparameters of training/testing config
 
 ### Training Config
 Basic training config is consist of `data`, `model`, `optim` and `solver`.
+`data`, `model` and `optim` provide hyperparameter for each part. `solver`
+provide setting for every algorithm. Please check `config/train` for detailed
+information.
+
+Config for domain adversarial method is a little bit different. `model` is
+split into `gen` and `dis`, which stand for generator and discrimator module in
+GAN. All Conv-TasNet hyparameters is setting in `gen`. Also, `optim` is split
+into `g_optim` and `d_optim` for optimizer setting of Conv-TasNet and
+discriminator.
 
 ### Testing Config
-Basic testing config is consist of `data` and `solver`.
-
-#### data
+Basic testing config is consist of `data` and `solver`. Detailed information is
+in `config/test`.
 
 ## Reference
 

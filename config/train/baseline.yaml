@@ -1,39 +1,69 @@
 data:
+    # set dataset for training, support 'wsj0', 'vctk', 'wham', 'wham-easy', 'wsj0-vctk'
     dset: 'wsj0'
+    # Don't need to change this sr
     sample_rate: 8000
+    # Set segment length(second) for data sampling and training
     segment: 4.0
 
 model:
+    #N: Number of filters in autoencoder
     N: 256
+    #L: Length of the filters (in samples)
     L: 20
+    #B: Number of channels in bottleneck 1 × 1-conv block
     B: 256
+    #H: Number of channels in convolutional blocks
     H: 512
+    #P: Kernel size in convolutional blocks
     P: 3
+    #X: Number of convolutional blocks in each repeat
     X: 8
+    #R: Number of repeats
     R: 4
+    #C: Number of speakers
     C: 2
+    #norm_type: BN(Batch Norm), gLN(Global Layer Norm), cLN(Layer Norm)
     norm_type: 'gLN'
+    #causal: causal or non-causal
     causal: 0
+    #mask_nonlinear: activation function for generating mask, support 'softmax' and 'relu'
+    # I always use 'softmax' in my thesis
     mask_nonlinear: 'softmax'
 
 optim:
+    # support 'Adam' and 'ranger'
     type: 'Adam'
     lr: 0.001
     weight_decay: 0.0
 
 solver:
+    # exp_name show in comet, save_dir, log_dir.
+    # Whole name will be f'{exp_name}_{time_stamp}'
     exp_name: 'baseline'
+    # Dir for checkpoints and backup training config
     save_dir: './checkpoints/'
+    # Max save number for checkpoints. Saving critierion is based on si-snri
     max_save_num: 3
+    # Dir for comet log
     log_dir: './logs/'
+    # Training epochs
     epochs: 100
+    # Training starts from this hyperparameter. Used for resume training
     start_epoch: 0
+    # resume exp name should be whole name ( f'{exp_name}_{time_stamp}' )
     resume_exp_name: ""
+    # Whether to resume optimizer state while resuming training.
     resume_optim: False
+    # Grad cliping
     grad_clip: 5
+    # Batch size
     batch_size: 4
+    # njobs for pytorch dataloader
     num_workers: 4
+    # Enable force save based on this epoch freq. These checkpoints is independent from 'max_save_num'
     save_freq: 10
+    # Scheduler for learning rate. Only use 'ReduceLROnPlateau' supported by pytorch
     scheduler:
         use: True
         type: 'ReduceLROnPlateau'

@@ -1,3 +1,7 @@
+# There is two perturbation need to be set in pi-model.
+# First one can be set in 'input_transform' of 'solver', which stand for gaussian noise.
+# Second one is set in 'sep_out_dropout' of 'model', which stand for dropout part.
+# Choose one while training.
 data:
     dset: 'wsj0'
     sample_rate: 8000
@@ -17,6 +21,7 @@ model:
     norm_type: 'gLN'
     causal: 0
     mask_nonlinear: 'softmax'
+    # Perturbation 2: add dropout on sep output
     sep_out_dropout: 0.1
 
 optim:
@@ -38,13 +43,35 @@ solver:
     grad_clip: 5
     batch_size: 2
     num_workers: 4
+    # Perturbation 1: add gaussian noise on waveform
+    # Only need to change 'scale'
+    input_transform:
+        where: 'wav'
+        methods: [ 'noise' ]
+        noise:
+            scale: 0.05
+    # hyparameter for pi-model
     pi:
         use: True
-        loss_type: 'mse' # sisnr or mse
+        # loss type, support 'mse' and 'sisnr'
+        # If is 'mse', need to config 'locs' for loss location
+        # 'sisnr' compute on waveform
+        loss_type: 'mse'
+        # pi-model loss weight of source domain dataset, 0 won't consider source domain dataset.
         sup_lambda: 0.1
+        # pi-model loss weight of target domain dataset
         uns_lambda: 0.1
+        # warmup step used in pi-model
+        # Please check cal_consistency_weight() in 'src/train_pimt.py'
         warmup_step: 40000
-    locs: [ '2|3' ]
+    # location for computing consistency regularization in repersentation
+    # format: [ '2|r', '2|r|x', 'mask', ... ]
+    # r stand index of R
+    # x stand index of X
+    # '2|r' means use output of rth repeat block
+    # '2|r|x' means use output of rth repeat block and xth res block
+    # 'mask' means computing pit-mse loss on mask
+    locs: [ '2|3', 'mask' ]
     scheduler:
         use: True
         type: 'ReduceLROnPlateau'
