@@ -1,0 +1,3 @@
+wsj_root: /groups/public/szulin_separation_dataset/wsj0/
+vctk_root: /groups/public/szulin_separation_dataset/vctk-mix/wav8k/min/
+wsj0-vctk_root: /groups/public/szulin_separation_dataset/wsj0-vctk/wav8k/min/
