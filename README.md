@@ -17,8 +17,7 @@ Check [here](data/make_mix).
 
 ## Basic Config
 
-1. `cp config/path_example.yaml config/path.yaml`
-2. Change path in config/path.yaml
+1. Change path in config/path.yaml
     - `wsj_root`: wsj0-2mix directory
     - `vctk_root`: vctk-2mix directory
     - `wsj0-vctk_root`: wsj0-vctk directory
