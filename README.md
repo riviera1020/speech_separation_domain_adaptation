@@ -22,8 +22,7 @@ Check [here](data/make_mix).
     - `wsj_root`: wsj0-2mix directory
     - `vctk_root`: vctk-2mix directory
     - `wsj0-vctk_root`: wsj0-vctk directory
-    - Noise of Wham is moved to `wsj_root` based on [Data Process](#Data
-      Process)
+    - Noise of Wham is moved to `wsj_root` based on [Data Process](https://github.com/riviera1020/speech_separation_domain_adaptation/tree/master/data/make_mix#wham)
     - All directory must contain 'tr/', 'cv/' and 'tt/' subfolder.
 
 ## Comet Introduction
