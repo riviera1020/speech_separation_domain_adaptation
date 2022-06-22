@@ -3,7 +3,7 @@ comet-ml==3.1.5
 librosa==0.7.2
 matplotlib==3.2.0
 mir-eval==0.5
-numpy==1.18.1
+numpy==1.22.0
 PyYAML==5.3
 scikit-learn==0.22.1
 scipy==1.4.1
